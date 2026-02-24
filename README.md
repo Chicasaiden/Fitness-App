@@ -1,16 +1,60 @@
-# hello_flutter
+# Fitness-App
 
-A new Flutter project.
+A Flutter app designed to help users track workouts, monitor progress, and maintain fitness routines.
+
+## Features
+
+- Track exercises and sets
+- Log weight and reps
+- View progress over time
+- Simple, clean Flutter UI
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+### Prerequisites
 
-A few resources to get you started if this is your first Flutter project:
+- Flutter SDK: https://flutter.dev/docs/get-started/install
+- Dart SDK (comes with Flutter)
+- A code editor like VS Code or Android Studio
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+### Installation
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+1. Clone the repo:
+
+```bash
+git clone https://github.com/Chicasaiden/Fitness-App.git
+```
+
+2. Open the project in your code editor:
+
+```bash
+cd Fitness-App
+code .
+```
+
+3. Install dependencies:
+
+```bash
+flutter pub get
+```
+
+4. Run the app:
+
+```bash
+flutter run
+```
+
+## Usage
+
+- **Home Screen**: View current workout and quick stats
+- **Metrics Dashboard**: Detailed rep tracking and velocity graphs
+- **Workout History**: Browse past workouts and progress
+- **Settings**: Configure app preferences
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the MIT License.
