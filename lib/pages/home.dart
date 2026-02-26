@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'data_dashboard.dart';
-import 'workouts_page.dart';
 import 'live_workout_page.dart';
 import 'view_old_workout_page.dart';
 import 'plan_workout_page.dart';
@@ -11,20 +10,20 @@ import 'settings_page.dart';
 import 'metrics_dashboard_page.dart';
 import '../services/ble_service.dart';
 import '../services/set_tracker.dart';
-import '../repositories/user_repository.dart';
+import '../services/auth_service.dart';
 import '../repositories/workout_repository.dart';
 import '../ble_metrics.dart';
 
 class HomePage extends StatefulWidget {
   final BleService bleService;
-  final UserRepository userRepository;
+  final AuthService authService;
   final WorkoutRepository workoutRepository;
   final String connectedDeviceName;
 
   const HomePage({
     Key? key,
     BleService? bleService,
-    required this.userRepository,
+    required this.authService,
     required this.workoutRepository,
     this.connectedDeviceName = '',
   })  : bleService = bleService ?? const _DummyBleService(),
@@ -42,39 +41,27 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _connectedDevice = widget.connectedDeviceName;
+    _connectedDevice = widget.connectedDeviceName.isNotEmpty
+        ? widget.connectedDeviceName
+        : widget.bleService.connectedDeviceName;
     _setTracker = SetTracker(widget.bleService);
-    _listenToDeviceStatus();
   }
 
-  void _listenToDeviceStatus() {
-    widget.bleService.scanResults.listen((results) {
-      // Check if any devices are currently connected
-      // A device is "connected" if it's in scan results and actively connected
-      if (mounted) {
-        setState(() {
-          // If we have scan results, check the first one for connection status
-          if (results.isNotEmpty) {
-            _connectedDevice = results.first.device.platformName.isNotEmpty 
-                ? results.first.device.platformName 
-                : results.first.device.remoteId.toString();
-          }
-        });
+  /// Sync connection state from the BLE service after returning from
+  /// the DataDashboard (connect screen).
+  void _syncConnectionStatus([String? returnedName]) {
+    setState(() {
+      if (returnedName != null && returnedName.isNotEmpty) {
+        _connectedDevice = returnedName;
+      } else {
+        _connectedDevice = widget.bleService.connectedDeviceName;
       }
     });
   }
 
-  late final List<Widget> _pages = [
-    _buildHomePage(),
-    const CalendarPage(),
-    const NewsPage(),
-    SettingsPage(userRepository: widget.userRepository),
-  ];
-
   Widget _buildHomePage() {
-    final currentUser = widget.userRepository.getCurrentUser();
-    final userName = currentUser?.username ?? 'User';
-    final userId = currentUser?.id ?? '';
+    final currentUser = widget.authService.currentUser;
+    final userName = currentUser?.displayName ?? 'User';
 
     return SingleChildScrollView(
       child: Column(
@@ -129,14 +116,8 @@ class _HomePageState extends State<HomePage> {
                               builder: (context) => DataDashboard(bleService: widget.bleService),
                             ),
                           );
-                          // Update connected device if one was returned
-                          if (result != null && mounted) {
-                            setState(() {
-                              _connectedDevice = result;
-                            });
-                          } else if (mounted) {
-                            // If returning without result, refresh to check current connection
-                            setState(() {});
+                          if (mounted) {
+                            _syncConnectionStatus(result as String?);
                           }
                         },
                         icon: const Icon(Icons.bluetooth, size: 22),
@@ -204,7 +185,7 @@ class _HomePageState extends State<HomePage> {
                   title: 'Metrics',
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      final currentUser = widget.userRepository.getCurrentUser();
+                      final currentUser = widget.authService.currentUser;
                       final userId = currentUser?.id ?? '';
                       Navigator.push(
                         context,
@@ -365,8 +346,19 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Build pages dynamically so the home page refreshes when _connectedDevice changes
+    final pages = <Widget>[
+      _buildHomePage(),
+      const CalendarPage(),
+      const NewsPage(),
+      SettingsPage(authService: widget.authService),
+    ];
+
     return Scaffold(
-      body: _pages[_currentPageIndex],
+      body: IndexedStack(
+        index: _currentPageIndex,
+        children: pages,
+      ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: (int index) {
           setState(() {
@@ -417,6 +409,9 @@ class _DummyBleService implements BleService {
 
   @override
   Future<void> connectToDevice(BluetoothDevice device) async {}
+
+  @override
+  String get connectedDeviceName => '';
 
   @override
   void dispose() {}

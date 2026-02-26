@@ -26,6 +26,15 @@ class RealBleService implements BleService {
   Stream<List<int>> get dataStream => _dataController.stream;
 
   @override
+  String get connectedDeviceName {
+    final dev = _connectedDevice;
+    if (dev == null) return '';
+    return dev.platformName.isNotEmpty
+        ? dev.platformName
+        : dev.remoteId.toString();
+  }
+
+  @override
   Future<void> startScan() async {
     try {
       if (!await FlutterBluePlus.isSupported) {

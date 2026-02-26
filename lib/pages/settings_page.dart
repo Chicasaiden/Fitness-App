@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import '../repositories/user_repository.dart';
+import '../services/auth_service.dart';
 
+/// Settings page — now uses AuthService instead of UserRepository.
+///
+/// The key difference: we get user info from Firebase Auth (currentUser)
+/// instead of reading from SharedPreferences. Logout calls
+/// authService.signOut() which signs out of both Firebase and Google.
 class SettingsPage extends StatefulWidget {
-  final UserRepository userRepository;
+  final AuthService authService;
 
-  const SettingsPage({super.key, required this.userRepository});
+  const SettingsPage({super.key, required this.authService});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -13,7 +18,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
-    final currentUser = widget.userRepository.getCurrentUser();
+    final currentUser = widget.authService.currentUser;
 
     return Scaffold(
       appBar: AppBar(
@@ -47,18 +52,18 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        currentUser?.username ?? 'No user logged in',
+                        currentUser?.displayName ?? 'No user logged in',
                         style: const TextStyle(
                           color: Colors.black87,
                           fontSize: 20,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (currentUser?.email != null)
+                      if (currentUser?.email != null && currentUser!.email.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: Text(
-                            currentUser!.email!,
+                            currentUser.email,
                             style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                           ),
                         ),
@@ -119,10 +124,11 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: Text('Logout', style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.w600)),
                     trailing: Icon(Icons.chevron_right, color: Colors.grey.shade400),
                     onTap: () async {
-                      await widget.userRepository.logout();
-                      if (mounted) {
-                        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-                      }
+                      // Sign out of Firebase + Google
+                      await widget.authService.signOut();
+                      // No manual navigation needed!
+                      // The StreamBuilder in main.dart detects the auth state
+                      // change (user becomes null) and automatically shows LoginPage.
                     },
                   ),
                 ),

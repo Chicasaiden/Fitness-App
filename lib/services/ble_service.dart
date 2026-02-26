@@ -5,6 +5,9 @@ import '../ble_metrics.dart';
 abstract class BleService {
   Stream<BleMetrics> metricsStream();
 
+  /// The name of the currently connected device, or empty if none.
+  String get connectedDeviceName;
+
   Stream<List<int>> get dataStream;
 
   Stream<List<ScanResult>> get scanResults;

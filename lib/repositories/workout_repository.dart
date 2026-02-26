@@ -1,7 +1,12 @@
-import 'package:hive/hive.dart';
 import '../models/workout.dart';
 
-/// Abstract repository for managing workout data
+/// Abstract repository for managing workout data.
+/// This interface stays the same — Phase 2 will add a FirestoreWorkoutRepository.
+///
+/// Why use an abstract class (interface)?
+/// It lets us swap implementations without changing the rest of the app.
+/// Currently we use InMemoryWorkoutRepository (temporary),
+/// and in Phase 2 we'll create FirestoreWorkoutRepository.
 abstract class WorkoutRepository {
   Future<void> addWorkout(Workout workout);
   Future<List<Workout>> getWorkoutsByUserId(String userId);
@@ -11,52 +16,43 @@ abstract class WorkoutRepository {
   Future<void> clearAllWorkouts();
 }
 
-/// Hive-based implementation of WorkoutRepository
+/// Temporary in-memory implementation until Phase 2 (Firestore).
+/// Data will NOT persist across app restarts — that's expected for now.
+/// Phase 2 replaces this with FirestoreWorkoutRepository.
 class HiveWorkoutRepository implements WorkoutRepository {
-  static const String _boxName = 'workouts';
-  late Box<Map> _workoutBox;
-
-  /// Initialize the Hive box
-  Future<void> init() async {
-    _workoutBox = await Hive.openBox<Map>(_boxName);
-  }
+  final Map<String, Workout> _workouts = {};
 
   @override
   Future<void> addWorkout(Workout workout) async {
-    await _workoutBox.put(workout.id, workout.toJson());
+    _workouts[workout.id] = workout;
   }
 
   @override
   Future<List<Workout>> getWorkoutsByUserId(String userId) async {
-    final allWorkouts = _workoutBox.values
-        .map((json) => Workout.fromJson(Map<String, dynamic>.from(json)))
+    final userWorkouts = _workouts.values
         .where((w) => w.userId == userId)
         .toList();
-
-    // Sort by date descending (newest first)
-    allWorkouts.sort((a, b) => b.date.compareTo(a.date));
-    return allWorkouts;
+    userWorkouts.sort((a, b) => b.date.compareTo(a.date));
+    return userWorkouts;
   }
 
   @override
   Future<Workout?> getWorkoutById(String id) async {
-    final json = _workoutBox.get(id);
-    if (json == null) return null;
-    return Workout.fromJson(Map<String, dynamic>.from(json));
+    return _workouts[id];
   }
 
   @override
   Future<void> updateWorkout(Workout workout) async {
-    await _workoutBox.put(workout.id, workout.toJson());
+    _workouts[workout.id] = workout;
   }
 
   @override
   Future<void> deleteWorkout(String id) async {
-    await _workoutBox.delete(id);
+    _workouts.remove(id);
   }
 
   @override
   Future<void> clearAllWorkouts() async {
-    await _workoutBox.clear();
+    _workouts.clear();
   }
 }
