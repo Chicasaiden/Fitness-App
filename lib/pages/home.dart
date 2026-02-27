@@ -251,10 +251,14 @@ class _HomePageState extends State<HomePage> {
                           Expanded(
                             child: ElevatedButton.icon(
                               onPressed: () {
+                                final currentUser = widget.authService.currentUser;
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => const ViewOldWorkoutPage(),
+                                    builder: (context) => ViewOldWorkoutPage(
+                                      workoutRepository: widget.workoutRepository,
+                                      userId: currentUser?.id ?? '',
+                                    ),
                                   ),
                                 );
                               },
@@ -349,7 +353,10 @@ class _HomePageState extends State<HomePage> {
     // Build pages dynamically so the home page refreshes when _connectedDevice changes
     final pages = <Widget>[
       _buildHomePage(),
-      const CalendarPage(),
+      CalendarPage(
+        workoutRepository: widget.workoutRepository,
+        userId: widget.authService.currentUser?.id ?? '',
+      ),
       const NewsPage(),
       SettingsPage(authService: widget.authService),
     ];
