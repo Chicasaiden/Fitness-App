@@ -27,6 +27,7 @@ class SetSummary {
   final double? impulse; // N·s
   final String? suggestedNextLoad;
 
+  final String exercise;
   final DateTime timestamp;
 
   SetSummary({
@@ -47,6 +48,7 @@ class SetSummary {
     required this.meanAvgZAccel,
     required this.meanPeakZAccel,
     required this.timestamp,
+    this.exercise = 'Unspecified',
     this.loadLbs,
     this.estimatedMeanPower,
     this.estimatedPeakPower,
@@ -72,6 +74,7 @@ class SetSummary {
     'meanROM': meanROM,
     'meanAvgZAccel': meanAvgZAccel,
     'meanPeakZAccel': meanPeakZAccel,
+    'exercise': exercise,
     'timestamp': timestamp.toIso8601String(),
     'loadLbs': loadLbs,
     'estimatedMeanPower': estimatedMeanPower,
@@ -101,6 +104,7 @@ class SetSummary {
     meanAvgZAccel: (json['meanAvgZAccel'] as num).toDouble(),
     meanPeakZAccel: (json['meanPeakZAccel'] as num).toDouble(),
     timestamp: DateTime.parse(json['timestamp'] as String),
+    exercise: json['exercise'] as String? ?? 'Unspecified',
     loadLbs: (json['loadLbs'] as num?)?.toDouble(),
     estimatedMeanPower: (json['estimatedMeanPower'] as num?)?.toDouble(),
     estimatedPeakPower: (json['estimatedPeakPower'] as num?)?.toDouble(),

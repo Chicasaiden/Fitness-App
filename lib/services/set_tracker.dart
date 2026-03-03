@@ -15,6 +15,7 @@ class SetTracker {
   final List<RepRecord> _currentReps = [];
   int _lastRepNumber = 0;
   double? _loadLbs;
+  String _currentExercise = 'Unspecified';
   bool _setCompleteHandled = false;
   bool _isSetActive = true; // false after set ends, until new set starts
 
@@ -76,6 +77,11 @@ class SetTracker {
   /// Set the load (lbs) for power/1RM calculations.
   void setLoad(double? lbs) {
     _loadLbs = lbs;
+  }
+
+  /// Set the exercise for the current set.
+  void setExercise(String exercise) {
+    _currentExercise = exercise;
   }
 
   /// Start tracking. Subscribes to BLE metrics.
@@ -145,6 +151,7 @@ class SetTracker {
       _currentReps,
       loadKg: loadKg,
       loadLbs: _loadLbs,
+      exercise: _currentExercise,
     );
     _completedSets.add(summary);
     _completedSetVelocitySamples.add(List.from(_currentVelocitySamples));
@@ -172,6 +179,7 @@ class SetTracker {
     _currentVelocitySamples.clear();
     _lastRepNumber = 0;
     _loadLbs = null;
+    _currentExercise = 'Unspecified';
     _lastCompletedRep = null;
     _setCompleteHandled = false;
     _isSetActive = true;

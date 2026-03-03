@@ -51,8 +51,24 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   final TextEditingController _loadController = TextEditingController();
   double? _loadLbs;
 
+  // Exercise selection
+  String _selectedExercise = 'Squat';
+  static const List<String> _exercises = [
+    'Squat', 'Front Squat', 'Bench Press', 'Incline Bench',
+    'Overhead Press', 'Deadlift', 'Romanian Deadlift',
+    'Barbell Row', 'Hip Thrust', 'Power Clean',
+    'Push Press', 'Lunges', 'Custom',
+  ];
+
+  // Rep velocity flash feedback
+  Color? _repFlashColor;
+  bool _showRepFlash = false;
+
   // Past workouts
   List<Workout> _pastWorkouts = [];
+
+  // Exercise filter for trends
+  String _trendExerciseFilter = 'All';
 
   @override
   void initState() {
@@ -63,12 +79,25 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   }
 
   void _setupListeners() {
-    _repSub = widget.setTracker.repStream.listen((_) {
+    _repSub = widget.setTracker.repStream.listen((rep) {
       setState(() {
-        // New rep came in — if we're in auto-select mode, keep showing latest
-        if (_selectedRepIndex == null && _viewingSetIndex == null) {
-          // auto mode, will show latest
+        // Flash the velocity number green or red
+        final reps = widget.setTracker.currentReps;
+        if (reps.length >= 2) {
+          final avgSoFar = reps.take(reps.length - 1)
+              .map((r) => r.meanConcentricVelocity)
+              .reduce((a, b) => a + b) / (reps.length - 1);
+          _repFlashColor = rep.meanConcentricVelocity >= avgSoFar
+              ? Colors.green
+              : Colors.red;
+        } else {
+          _repFlashColor = Colors.green; // First rep is always "good"
         }
+        _showRepFlash = true;
+      });
+      // Clear flash after 1.5 seconds
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) setState(() => _showRepFlash = false);
       });
     });
 
@@ -107,14 +136,94 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     widget.setTracker.setLoad(lbs);
   }
 
-  void _onNewSetPressed() {
+  void _onEndSetPressed() {
+  void _onEndSetPressed() {
     widget.setTracker.endCurrentSet();
     setState(() {
       _selectedRepIndex = null;
       _viewingSetIndex = null;
       _liveVelocityData.clear();
-      _latestMetrics = null; // clear velocity display
+      _latestMetrics = null;
     });
+    
+    // Optional tactile feedback
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Set Ended', style: TextStyle(fontWeight: FontWeight.w600)),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+  }
+
+  void _onFinishWorkout() async {
+    // End any active set
+    widget.setTracker.endCurrentSet();
+
+    final sets = widget.setTracker.completedSets;
+    if (sets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No sets completed to save.')),
+      );
+      Navigator.pop(context);
+      return;
+    }
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // Calculate session aggregates
+      final durationSeconds = sets.fold<double>(0, (sum, s) => sum + s.setDuration);
+      final totalTUT = sets.fold<double>(0, (sum, s) => sum + s.totalTUT);
+      final avgROM = sets.fold<double>(0, (sum, s) => sum + s.meanROM) / sets.length;
+      final avgZAccel = sets.fold<double>(0, (sum, s) => sum + s.meanAvgZAccel) / sets.length;
+      final peakZAccel = sets.fold<double>(0.0, (maxA, s) => s.meanPeakZAccel > maxA ? s.meanPeakZAccel : maxA);
+      
+      final mcvs = sets.expand((s) => s.reps.map((r) => r.meanConcentricVelocity)).toList();
+      final overallMeanMCV = mcvs.isNotEmpty ? mcvs.reduce((a, b) => a + b) / mcvs.length : 0.0;
+      
+      final pcvs = sets.expand((s) => s.reps.map((r) => r.peakConcentricVelocity)).toList();
+      final overallPeakPCV = pcvs.isNotEmpty ? pcvs.reduce((a, b) => a > b ? a : b) : 0.0;
+
+      // Create new workout
+      final workout = Workout(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        userId: widget.userId,
+        date: DateTime.now(),
+        duration: durationSeconds,
+        meanConcentricVelocity: overallMeanMCV,
+        peakConcentricVelocity: overallPeakPCV,
+        timeUnderTension: totalTUT,
+        rangeOfMotion: avgROM,
+        averageZAcceleration: avgZAccel,
+        peakZAcceleration: peakZAccel,
+        sets: sets,
+      );
+
+      // Save to repo
+      await widget.workoutRepository.addWorkout(workout);
+
+      if (mounted) {
+        Navigator.pop(context); // pop loading
+        Navigator.pop(context); // pop training screen
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Workout saved successfully! 🏋️‍♂️')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // pop loading
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving workout: $e')),
+        );
+      }
+    }
   }
 
   void _onRepBarTapped(int index) {
@@ -211,7 +320,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Metrics & Data'),
+        title: const Text('Training'),
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
@@ -223,6 +332,9 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Exercise Dropdown
+            _buildExerciseRow(),
+            const SizedBox(height: 12),
             // Load Input + New Set button
             _buildLoadAndNewSetRow(),
             const SizedBox(height: 16),
@@ -272,8 +384,64 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
               _buildTrendsCard(),
               const SizedBox(height: 16),
             ],
+
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _onFinishWorkout,
+                icon: const Icon(Icons.check_circle, size: 22),
+                label: const Text('Finish Workout'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade600,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── Exercise Dropdown Row ───
+  Widget _buildExerciseRow() {
+    return _buildCard(
+      child: Row(
+        children: [
+          Icon(Icons.sports_gymnastics, color: Colors.grey.shade600, size: 20),
+          const SizedBox(width: 8),
+          const Text('Exercise:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              value: _selectedExercise,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              items: _exercises.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13)))).toList(),
+              onChanged: (v) {
+                // Auto-end the current set BEFORE changing the exercise
+                // so previous reps don't get mislabeled.
+                widget.setTracker.endCurrentSet();
+                setState(() {
+                  _selectedExercise = v!;
+                  _selectedRepIndex = null;
+                  _viewingSetIndex = null;
+                  _liveVelocityData.clear();
+                  _latestMetrics = null;
+                });
+                widget.setTracker.setExercise(v!);
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -292,7 +460,17 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             child: TextField(
               controller: _loadController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: _onLoadChanged,
+              onChanged: (val) {
+                // Auto-end current set on load change
+                widget.setTracker.endCurrentSet();
+                _onLoadChanged(val);
+                setState(() {
+                  _selectedRepIndex = null;
+                  _viewingSetIndex = null;
+                  _liveVelocityData.clear();
+                  _latestMetrics = null;
+                });
+              },
               decoration: InputDecoration(
                 hintText: '0',
                 suffixText: 'lbs',
@@ -304,12 +482,14 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           ),
           const Spacer(),
           ElevatedButton.icon(
-            onPressed: _onNewSetPressed,
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('New Set'),
+            onPressed: widget.setTracker.isSetActive ? _onEndSetPressed : null,
+            icon: const Icon(Icons.stop_circle_outlined, size: 16),
+            label: const Text('End Set'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black87,
+              backgroundColor: Colors.red.shade600,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.grey.shade300,
+              disabledForegroundColor: Colors.grey.shade500,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -394,7 +574,13 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                 _viewingSetIndex != null
                     ? displayMCV.toStringAsFixed(3)
                     : (vz != null ? vz.toStringAsFixed(3) : '--'),
-                style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w800, color: Colors.black87),
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w800,
+                  color: _showRepFlash && _viewingSetIndex == null
+                      ? (_repFlashColor ?? Colors.black87)
+                      : Colors.black87,
+                ),
               ),
               const SizedBox(width: 6),
               Text('m/s', style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
@@ -628,8 +814,121 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     );
   }
 
+  // ─── PR Detection ───
+  Map<String, bool> _detectPRs(SetSummary s) {
+    final prs = <String, bool>{'mcv': false, 'pcv': false, 'rom': false};
+    // Collect all set MCVs from past workouts
+    double bestMCV = 0, bestPCV = 0, bestROM = 0;
+    for (final w in _pastWorkouts) {
+      for (final set in w.sets) {
+        if (set.bestMCV > bestMCV) bestMCV = set.bestMCV;
+        if (set.meanPCV > bestPCV) bestPCV = set.meanPCV;
+        if (set.meanROM > bestROM) bestROM = set.meanROM;
+      }
+    }
+    // Also check completed sets from current session
+    for (final set in widget.setTracker.completedSets) {
+      if (set != s) {
+        if (set.bestMCV > bestMCV) bestMCV = set.bestMCV;
+        if (set.meanPCV > bestPCV) bestPCV = set.meanPCV;
+        if (set.meanROM > bestROM) bestROM = set.meanROM;
+      }
+    }
+    prs['mcv'] = s.bestMCV > bestMCV && bestMCV > 0;
+    prs['pcv'] = s.meanPCV > bestPCV && bestPCV > 0;
+    prs['rom'] = s.meanROM > bestROM && bestROM > 0;
+    return prs;
+  }
+
+  // ─── Trend Arrows ───
+  /// Returns a map of metric name → % change vs average of last 5 workouts.
+  Map<String, double> _computeTrends(SetSummary s) {
+    final trends = <String, double>{};
+    if (_pastWorkouts.isEmpty) return trends;
+    final recent = _pastWorkouts.take(5).toList();
+    final avgMCV = recent.map((w) => w.meanConcentricVelocity).reduce((a, b) => a + b) / recent.length;
+    final avgPCV = recent.map((w) => w.peakConcentricVelocity).reduce((a, b) => a + b) / recent.length;
+    if (avgMCV > 0) trends['MCV'] = (s.meanMCV - avgMCV) / avgMCV * 100;
+    if (avgPCV > 0) trends['PCV'] = (s.meanPCV - avgPCV) / avgPCV * 100;
+    return trends;
+  }
+
+  Widget _prBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.amber.shade400),
+      ),
+      child: const Text('🏆 PR!', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _trendArrow(double change) {
+    final isUp = change >= 0;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(isUp ? Icons.arrow_upward : Icons.arrow_downward,
+            size: 10, color: isUp ? Colors.green : Colors.red),
+        Text('${change.abs().toStringAsFixed(1)}%',
+            style: TextStyle(fontSize: 9, fontWeight: FontWeight.w600, color: isUp ? Colors.green : Colors.red)),
+      ],
+    );
+  }
+
+  /// Enhanced metric mini with optional PR badge, trend arrow, and subtitle
+  Widget _metricMiniEnhanced(String title, String value, String unit, {bool isPR = false, double? trend, String? subtitle}) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: isPR ? Colors.amber.shade50 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isPR ? Colors.amber.shade300 : Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(title, style: TextStyle(fontSize: 9, color: Colors.grey.shade600, fontWeight: FontWeight.w500))),
+              if (isPR) _prBadge(),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(value,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.black87)),
+                ),
+              ),
+              const SizedBox(width: 2),
+              Text(unit, style: TextStyle(fontSize: 8, color: Colors.grey.shade500)),
+            ],
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(subtitle, style: TextStyle(fontSize: 8, color: Colors.grey.shade500)),
+          ],
+          if (trend != null) _trendArrow(trend),
+        ],
+      ),
+    );
+  }
+
   // ─── Set Summary ───
   Widget _buildSetSummaryCard(SetSummary s) {
+    final prs = _detectPRs(s);
+    final trends = _computeTrends(s);
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -637,6 +936,18 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           Row(
             children: [
               const Text('Set Summary', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+              if (prs.values.any((v) => v)) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    border: Border.all(color: Colors.amber.shade400),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text('🏆 New PR!', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                ),
+              ],
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -657,15 +968,15 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             mainAxisSpacing: 8,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.4,
+            childAspectRatio: 1.1, // Adjusted from 1.4 to prevent overflow
             children: [
-              _metricMini('Mean MCV', s.meanMCV.toStringAsFixed(3), 'm/s'),
-              _metricMini('Mean PCV', s.meanPCV.toStringAsFixed(3), 'm/s'),
+              _metricMiniEnhanced('Mean MCV', s.meanMCV.toStringAsFixed(3), 'm/s', trend: trends['MCV']),
+              _metricMiniEnhanced('Mean PCV', s.meanPCV.toStringAsFixed(3), 'm/s', isPR: prs['pcv']!, trend: trends['PCV']),
               _metricMini('Total TUT', s.totalTUT.toStringAsFixed(1), 's'),
-              _metricMini('Best MCV', s.bestMCV.toStringAsFixed(3), 'm/s (R${s.bestRepNumber})'),
+              _metricMiniEnhanced('Best MCV', s.bestMCV.toStringAsFixed(3), 'm/s (R${s.bestRepNumber})', isPR: prs['mcv']!),
               _metricMini('Worst MCV', s.worstMCV.toStringAsFixed(3), 'm/s (R${s.worstRepNumber})'),
               _metricMini('Set Duration', s.setDuration.toStringAsFixed(1), 's'),
-              _metricMini('Mean ROM', (s.meanROM * 100).toStringAsFixed(1), 'cm'),
+              _metricMiniEnhanced('Mean ROM', (s.meanROM * 100).toStringAsFixed(1), 'cm', isPR: prs['rom']!),
               _metricMini('Mean Accel', s.meanAvgZAccel.toStringAsFixed(2), 'm/s²'),
               _metricMini('Peak Accel', s.meanPeakZAccel.toStringAsFixed(2), 'm/s²'),
             ],
@@ -690,9 +1001,10 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             mainAxisSpacing: 8,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 2.2,
+            childAspectRatio: 1.8, // Adjusted from 2.2 to accommodate subtitle
             children: [
-              _metricMini('V-Loss', s.velocityLossPercent.toStringAsFixed(1), '%'),
+              _metricMiniEnhanced('V-Loss', s.velocityLossPercent.toStringAsFixed(1), '%', 
+                                  subtitle: s.reps.length >= 2 ? '${s.reps.first.meanConcentricVelocity.toStringAsFixed(2)} → ${s.reps.last.meanConcentricVelocity.toStringAsFixed(2)} m/s' : null),
               _metricMini('Fatigue', s.fatigueIndex.toStringAsFixed(0), '/100'),
             ],
           ),
@@ -708,7 +1020,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
               mainAxisSpacing: 8,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.4,
+              childAspectRatio: 1.1, // Adjusted from 1.4
               children: [
                 _metricMini('Est. 1RM', s.estimated1RMLbs!.toStringAsFixed(1), 'lbs'),
                 _metricMini('Mean Power', s.estimatedMeanPower?.toStringAsFixed(0) ?? '--', 'W'),
@@ -747,6 +1059,18 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   // ─── Session History (clickable sets) ───
   Widget _buildSessionHistoryCard() {
     final sets = widget.setTracker.completedSets;
+    
+    // Group sets by exercise while retaining their absolute index for selection
+    final groupedSets = <String, List<MapEntry<int, SetSummary>>>{};
+    for (int i = 0; i < sets.length; i++) {
+      final s = sets[i];
+      final ex = s.exercise == 'Unspecified' ? 'Mixed Workout' : s.exercise;
+      if (!groupedSets.containsKey(ex)) {
+        groupedSets[ex] = [];
+      }
+      groupedSets[ex]!.add(MapEntry(i, s));
+    }
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -754,58 +1078,74 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           Text('Session History (${sets.length} sets)',
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
           const SizedBox(height: 12),
-          ...sets.asMap().entries.map((entry) {
-            final idx = entry.key;
-            final s = entry.value;
-            final isViewing = _viewingSetIndex == idx;
+          ...groupedSets.entries.expand((group) {
+            final exerciseName = group.key;
+            final entries = group.value;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: GestureDetector(
-                onTap: () => _onSessionHistoryTapped(idx),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isViewing ? Colors.blue.shade50 : Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isViewing ? Colors.blue.shade400 : Colors.grey.shade200, width: isViewing ? 2 : 1),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28, height: 28,
-                        decoration: BoxDecoration(
-                          color: isViewing ? Colors.blue.shade600 : Colors.black87,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Center(
-                          child: Text('${idx + 1}',
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${s.totalReps} reps • MCV: ${s.meanMCV.toStringAsFixed(2)} m/s',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                            Text(
-                              'V-Loss: ${s.velocityLossPercent.toStringAsFixed(1)}% • Fatigue: ${s.fatigueIndex.toStringAsFixed(0)}/100'
-                              '${s.estimated1RMLbs != null ? ' • 1RM: ${s.estimated1RMLbs!.toStringAsFixed(0)} lbs' : ''}',
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
-                    ],
-                  ),
+            return [
+              Padding(
+                padding: const EdgeInsets.only(left: 4, top: 4, bottom: 8),
+                child: Text(
+                  exerciseName,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.black87),
                 ),
               ),
-            );
-          }),
+              ...entries.asMap().entries.map((relativeEntry) {
+                final relativeIdx = relativeEntry.key;
+                final absoluteIdx = relativeEntry.value.key;
+                final s = relativeEntry.value.value;
+                final isViewing = _viewingSetIndex == absoluteIdx;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: GestureDetector(
+                    onTap: () => _onSessionHistoryTapped(absoluteIdx),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isViewing ? Colors.blue.shade50 : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: isViewing ? Colors.blue.shade400 : Colors.grey.shade200, width: isViewing ? 2 : 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 28, height: 28,
+                            decoration: BoxDecoration(
+                              color: isViewing ? Colors.blue.shade600 : Colors.black87,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Center(
+                              child: Text('${relativeIdx + 1}', // Show set 1, 2, 3 per exercise
+                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${s.totalReps} reps • MCV: ${s.meanMCV.toStringAsFixed(2)} m/s',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Text(
+                                  'V-Loss: ${s.velocityLossPercent.toStringAsFixed(1)}% • Fatigue: ${s.fatigueIndex.toStringAsFixed(0)}/100'
+                                  '${s.estimated1RMLbs != null ? ' • 1RM: ${s.estimated1RMLbs!.toStringAsFixed(0)} lbs' : ''}',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+            ];
+          }).toList(),
         ],
       ),
     );
@@ -813,16 +1153,51 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
 
   // ─── Workout Trends ───
   Widget _buildTrendsCard() {
+    // Filter workouts by exercise if filter is active
+    final filteredWorkouts = _trendExerciseFilter == 'All'
+        ? _pastWorkouts
+        : _pastWorkouts.where((w) =>
+            w.sets.any((s) => s.exercise == _trendExerciseFilter)
+          ).toList();
+
+    // Collect all unique exercises from past workouts
+    final exercises = <String>{'All'};
+    for (final w in _pastWorkouts) {
+      for (final s in w.sets) {
+        if (s.exercise != 'Unspecified') exercises.add(s.exercise);
+      }
+    }
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Workout Trends', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+          Row(
+            children: [
+              const Text('Workout Trends', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+              const Spacer(),
+              if (exercises.length > 1)
+                SizedBox(
+                  width: 120,
+                  child: DropdownButtonFormField<String>(
+                    value: _trendExerciseFilter,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    style: const TextStyle(fontSize: 11, color: Colors.black87),
+                    items: exercises.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 11)))).toList(),
+                    onChanged: (v) => setState(() => _trendExerciseFilter = v!),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 12),
           SizedBox(
             height: 100,
-            child: _pastWorkouts.length > 1
-                ? CustomPaint(size: Size.infinite, painter: _TrendChartPainter(_pastWorkouts))
+            child: filteredWorkouts.length > 1
+                ? CustomPaint(size: Size.infinite, painter: _TrendChartPainter(filteredWorkouts))
                 : Center(
                     child: Text('Need at least 2 workouts for trends',
                         style: TextStyle(color: Colors.grey.shade500, fontStyle: FontStyle.italic, fontSize: 13)),
@@ -909,7 +1284,7 @@ class _VelocityCurvePainter extends CustomPainter {
     if (samples.length < 2) return;
 
     // Filter out leading idle samples (near-zero velocity)
-    const double movementThreshold = 0.01; // m/s
+    const double movementThreshold = 0.05; // m/s (increased from 0.01 to ignore sensor noise)
     int startIdx = 0;
     for (int i = 0; i < samples.length; i++) {
       if (samples[i].velocity.abs() > movementThreshold) {

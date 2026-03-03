@@ -163,7 +163,7 @@ class MetricsCalculator {
   /// Build a complete SetSummary from a list of reps.
   /// [loadKg] is used for physics (force/power/impulse).
   /// [loadLbs] is used for display (1RM in lbs, suggestions in lbs).
-  static SetSummary buildSetSummary(List<RepRecord> reps, {double? loadKg, double? loadLbs}) {
+  static SetSummary buildSetSummary(List<RepRecord> reps, {double? loadKg, double? loadLbs, String exercise = 'Unspecified'}) {
     if (reps.isEmpty) {
       return SetSummary(
         reps: [],
@@ -183,6 +183,7 @@ class MetricsCalculator {
         meanAvgZAccel: 0,
         meanPeakZAccel: 0,
         timestamp: DateTime.now(),
+        exercise: exercise,
       );
     }
 
@@ -238,6 +239,7 @@ class MetricsCalculator {
       meanAvgZAccel: meanAvgZAccel,
       meanPeakZAccel: meanPeakZAccel,
       timestamp: DateTime.now(),
+      exercise: exercise,
       loadLbs: loadLbs,
       estimatedMeanPower: estMeanPower,
       estimatedPeakPower: estPeakPower,
