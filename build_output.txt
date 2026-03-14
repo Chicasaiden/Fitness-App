@@ -1,0 +1,118 @@
+﻿Resolving dependencies...
+Downloading packages...
+  dbus 0.7.11 (0.7.12 available)
+  device_info_plus 11.5.0 (12.3.0 available)
+  ffi 2.1.5 (2.2.0 available)
+  fl_chart 0.70.2 (1.1.1 available)
+  flutter_blue_plus 1.36.8 (2.2.1 available)
+  flutter_blue_plus_android 7.0.4 (8.2.1 available)
+  flutter_blue_plus_darwin 7.0.3 (8.2.1 available)
+  flutter_blue_plus_linux 7.0.3 (8.2.1 available)
+  flutter_blue_plus_platform_interface 7.0.0 (8.2.1 available)
+  flutter_blue_plus_web 7.0.2 (8.2.1 available)
+  google_sign_in 6.3.0 (7.2.0 available)
+  google_sign_in_android 6.2.1 (7.2.9 available)
+  google_sign_in_ios 5.9.0 (6.3.0 available)
+  google_sign_in_platform_interface 2.5.0 (3.1.0 available)
+  google_sign_in_web 0.12.4+4 (1.1.2 available)
+  image 4.5.4 (4.8.0 available)
+  lints 6.0.0 (6.1.0 available)
+  matcher 0.12.18 (0.12.19 available)
+  meta 1.17.0 (1.18.1 available)
+  permission_handler 11.4.0 (12.0.1 available)
+  permission_handler_android 12.1.0 (13.0.1 available)
+  petitparser 7.0.1 (7.0.2 available)
+  source_span 1.10.1 (1.10.2 available)
+  test_api 0.7.9 (0.7.10 available)
+  vibration 2.1.0 (3.1.8 available)
+  vibration_platform_interface 0.0.3 (0.1.1 available)
+  win32 5.15.0 (6.0.0 available)
+  win32_registry 2.1.0 (3.0.2 available)
+Got dependencies!
+28 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleRelease'...                        
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 9312 bytes (99.4% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+flutter : Note: Some 
+input files use or 
+override a 
+deprecated API.
+At line:1 char:17
++ flutter clean ; 
+flutter build apk 
+2>&1 | Out-File 
+-FilePath "C:\Users 
+...
++                 ~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (Note: S   
+ ome inpu...depre    
+cated API.:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+Note: Recompile with 
+-Xlint:deprecation 
+for details.
+warning: [options] 
+source value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+target value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+To suppress warnings 
+about obsolete 
+options, use 
+-Xlint:-options.
+3 warnings
+warning: [options] 
+source value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+target value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+To suppress warnings 
+about obsolete 
+options, use 
+-Xlint:-options.
+3 warnings
+warning: [options] 
+source value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+target value 8 is 
+obsolete and will be 
+removed in a future 
+release
+warning: [options] 
+To suppress warnings 
+about obsolete 
+options, use 
+-Xlint:-options.
+Note: Some input 
+files use or 
+override a 
+deprecated API.
+Note: Recompile with 
+-Xlint:deprecation 
+for details.
+3 warnings
+Running Gradle task 'assembleRelease'...                          209.3s
+ΓêÜ Built build\app\outputs\flutter-apk\app-release.apk (54.6MB)

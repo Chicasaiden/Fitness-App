@@ -127,6 +127,92 @@ class MetricsCalculator {
     return loadLbs / (percent / 100.0);
   }
 
+  // ─── Personalized Load-Velocity Profile (Linear Regression) ───
+
+  /// Exercise-specific Minimal Velocity Thresholds (m/s).
+  /// Based on González-Badillo & Sánchez-Medina (2010) and subsequent research.
+  /// The MVT is the average concentric velocity at a true 1RM repetition.
+  static const Map<String, double> exerciseMVTs = {
+    'back squat':      0.30,
+    'squat':           0.30,
+    'front squat':     0.30,
+    'box squat':       0.25,
+    'deadlift':        0.25,
+    'romanian deadlift': 0.25,
+    'bench press':     0.15,
+    'overhead press':  0.17,
+    'row':             0.20,
+    'pull-up':         0.20,
+    'chin-up':         0.20,
+    'unspecified':     0.30,
+  };
+
+  /// Returns the exercise-specific MVT for a given exercise name.
+  /// Defaults to 0.30 m/s if the exercise is not in the table.
+  static double mvtForExercise(String exercise) {
+    final key = exercise.toLowerCase().trim();
+    for (final entry in exerciseMVTs.entries) {
+      if (key.contains(entry.key)) return entry.value;
+    }
+    return 0.30; // general default
+  }
+
+  /// Calculates a personalized Daily 1RM using the Line of Best Fit (Linear Regression).
+  ///
+  /// Takes a list of [points] where X = Load (in lbs or kg) and Y = Velocity (MCV).
+  /// [mvt] is the Minimal Velocity Threshold — the velocity at which the athlete can
+  /// no longer complete a rep. Pass [exercise] to auto-look up the correct MVT from
+  /// the research-backed [exerciseMVTs] table.
+  /// 
+  /// Returns the estimated 1RM load, or null if there is not enough variance in the data.
+  static double? calculateDaily1RM({
+    required List<Point<double>> points,
+    String? exercise,
+    double? mvt,
+  }) {
+    // Use exercise-specific MVT from literature if not explicitly overridden
+    final double targetMVT = mvt ?? mvtForExercise(exercise ?? 'unspecified');
+    if (points.length < 2) return null; // Need at least 2 points for a line
+
+    double sumX = 0;
+    double sumY = 0;
+    double sumXY = 0;
+    double sumX2 = 0;
+    final int n = points.length;
+
+    for (final p in points) {
+      sumX += p.x;
+      sumY += p.y;
+      sumXY += p.x * p.y;
+      sumX2 += p.x * p.x;
+    }
+
+    final double meanX = sumX / n;
+    final double meanY = sumY / n;
+
+    // Calculate slope (m)
+    // Formula: m = (n*Σxy - Σx*Σy) / (n*Σx^2 - (Σx)^2)
+    final double denominator = (n * sumX2) - (sumX * sumX);
+    
+    // If the denominator is 0, it means all loads were exactly the same (vertical line).
+    if (denominator == 0) return null;
+
+    final double m = ((n * sumXY) - (sumX * sumY)) / denominator;
+
+    // A valid LVP should have a negative slope (velocity decreases as load increases)
+    if (m >= 0) return null; 
+
+    // Calculate Y-intercept (b)
+    // Formula: b = y_mean - m*x_mean
+    final double b = meanY - (m * meanX);
+
+    // Calculate 1RM (x) for target velocity (y = MVT)
+    // y = mx + b  =>  x = (y - b) / m
+    final double predicted1RM = (targetMVT - b) / m;
+
+    return predicted1RM > 0 ? predicted1RM : null;
+  }
+
   /// Suggest next-set load in lbs based on target velocity zone.
   static String suggestedNextLoad({
     required double currentMCV,
@@ -248,4 +334,47 @@ class MetricsCalculator {
       suggestedNextLoad: suggestion,
     );
   }
+
+  // ─── Plan Load Suggestion ───────────────────────────────────────────────
+
+  /// Zone-appropriate %1RM intensity targets for workout planning.
+  static const Map<String, double> _goalZoneIntensity = {
+    'Strength':     0.825, // 82.5% 1RM  (heavy, 3-6 reps)
+    'Hypertrophy':  0.700, // 70%   1RM  (moderate, 8-12 reps)
+    'Power':        0.600, // 60%   1RM  (fast, explosive)
+  };
+
+  /// Suggests a training load (lbs) for a planned movement by:
+  /// 1. Scanning [pastWorkouts] for the best estimated 1RM for [exercise]
+  /// 2. Applying the [goalZone]-appropriate intensity %
+  /// 3. Rounding to the nearest 2.5 lbs
+  ///
+  /// Returns null if no historical 1RM data exists for that exercise.
+  static double? suggestPlanLoad({
+    required String exercise,
+    required List<dynamic> pastWorkouts, // List<Workout>
+    String goalZone = 'Strength',
+  }) {
+    final exKey = exercise.toLowerCase().trim();
+    double best1RM = 0.0;
+
+    // Look through recent workouts for the best 1RM for this exercise
+    for (final w in pastWorkouts.take(5)) {
+      for (final set in (w.sets as List)) {
+        final setExercise = (set.exercise as String? ?? '').toLowerCase().trim();
+        if (setExercise != exKey) continue;
+        final rm = set.estimated1RMLbs as double?;
+        if (rm != null && rm > best1RM) best1RM = rm;
+      }
+    }
+
+    if (best1RM <= 0) return null;
+
+    final intensity = _goalZoneIntensity[goalZone] ?? 0.825;
+    final rawLoad = best1RM * intensity;
+
+    // Round to nearest 2.5 lbs
+    return (rawLoad / 2.5).round() * 2.5;
+  }
 }
+

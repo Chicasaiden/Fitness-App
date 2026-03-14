@@ -1,0 +1,60 @@
+﻿Analyzing hello_flutter...                                      
+
+   info - Parameter 'key' could be a super parameter - lib\pages\home.dart:25:9 - use_super_parameters
+   info - Unnecessary use of multiple underscores - lib\pages\login_page.dart:280:43 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\pages\login_page.dart:280:47 - unnecessary_underscores
+warning - Unused import: 'dart:math' - lib\pages\metrics_dashboard_page.dart:2:8 - unused_import
+warning - Dead code - lib\pages\metrics_dashboard_page.dart:143:55 - dead_code
+warning - The left operand can't be null, so the right operand is never executed - lib\pages\metrics_dashboard_page.dart:143:58 - dead_null_aware_expression
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\pages\metrics_dashboard_page.dart:744:15 - deprecated_member_use
+warning - The value of the local variable 'zoneColor' isn't used - lib\pages\metrics_dashboard_page.dart:914:11 - unused_local_variable
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\metrics_dashboard_page.dart:933:43 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\metrics_dashboard_page.dart:935:62 - deprecated_member_use
+warning - The declaration '_miniStat' isn't referenced - lib\pages\metrics_dashboard_page.dart:1096:10 - unused_element
+   info - Unnecessary use of 'toList' in a spread - lib\pages\metrics_dashboard_page.dart:1516:14 - unnecessary_to_list_in_spreads
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\pages\metrics_dashboard_page.dart:1551:21 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\metrics_dashboard_page.dart:1605:51 - deprecated_member_use
+   info - Unnecessary use of string interpolation - lib\pages\movement_sets_page.dart:97:51 - unnecessary_string_interpolations
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\onboarding_page.dart:207:41 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\pages\plan_workout_page.dart:176:21 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\plan_workout_page.dart:203:59 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\pages\plan_workout_page.dart:289:27 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\plan_workout_page.dart:519:43 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\plan_workout_page.dart:537:40 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\plan_workout_page.dart:539:59 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\progress_chart_page.dart:256:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\progress_chart_page.dart:282:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\progress_chart_page.dart:362:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\progress_chart_page.dart:362:77 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\pages\settings_page.dart:251:29 - deprecated_member_use
+warning - Dead code - lib\pages\settings_page.dart:402:41 - dead_code
+warning - Dead code - lib\pages\settings_page.dart:407:23 - dead_code
+   info - Unnecessary use of multiple underscores - lib\pages\view_old_workout_page.dart:103:37 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\pages\workout_movements_page.dart:67:43 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\workouts_page.dart:90:43 - deprecated_member_use
+warning - Unused import: '../models/planned_movement.dart' - lib\repositories\firestore_workout_plan_repository.dart:2:8 - unused_import
+   info - Unnecessary braces in a string interpolation - lib\repositories\firestore_workout_plan_repository.dart:27:15 - unnecessary_brace_in_string_interps
+warning - The operand can't be 'null', so the condition is always 'true' - lib\repositories\firestore_workout_plan_repository.dart:81:32 - unnecessary_null_comparison
+   info - The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/foundation.dart' - lib\services\real_ble_service.dart:4:8 - unnecessary_import
+   info - 'id' is deprecated and shouldn't be used. Use remoteId instead - lib\services\real_ble_service.dart:100:46 - deprecated_member_use
+   info - 'name' is deprecated and shouldn't be used. Use platformName instead - lib\services\real_ble_service.dart:100:62 - deprecated_member_use
+   info - 'state' is deprecated and shouldn't be used. Use connectionState instead - lib\services\real_ble_service.dart:115:43 - deprecated_member_use
+   info - The type of the right operand ('BluetoothDeviceState') isn't a subtype or a supertype of the left operand ('BluetoothConnectionState') - lib\services\real_ble_service.dart:116:26 - unrelated_type_equality_checks
+   info - 'BluetoothDeviceState' is deprecated and shouldn't be used. Use BluetoothConnectionState instead - lib\services\real_ble_service.dart:116:29 - deprecated_member_use
+   info - 'id' is deprecated and shouldn't be used. Use remoteId instead - lib\services\real_ble_service.dart:119:51 - deprecated_member_use
+   info - 'id' is deprecated and shouldn't be used. Use remoteId instead - lib\services\real_ble_service.dart:121:43 - deprecated_member_use
+   info - 'id' is deprecated and shouldn't be used. Use remoteId instead - lib\services\real_ble_service.dart:140:65 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use lastValueStream instead - lib\services\real_ble_service.dart:152:56 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use lastValueStream instead - lib\services\real_ble_service.dart:193:56 - deprecated_member_use
+   info - 'id' is deprecated and shouldn't be used. Use remoteId instead - lib\services\real_ble_service.dart:255:66 - deprecated_member_use
+
+flutter : 47 issues found. (ran in 16.8s)
+At line:1 char:1
++ flutter analyze 2>&1 | Out-File -FilePath 
+"C:\Users\Aiden\develop\app ...
++ ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (47     
+issues found. (ran in 16.8s):String) [], Rem    
+oteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

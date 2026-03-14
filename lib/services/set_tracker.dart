@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../ble_metrics.dart';
 import '../models/rep_record.dart';
@@ -84,6 +85,12 @@ class SetTracker {
     _currentExercise = exercise;
   }
 
+  /// Clear the last completed rep (used when exercise changes
+  /// so the UI shows a clean slate).
+  void clearLastCompletedRep() {
+    _lastCompletedRep = null;
+  }
+
   /// Start tracking. Subscribes to BLE metrics.
   void start() {
     _metricsSub?.cancel();
@@ -147,12 +154,46 @@ class SetTracker {
 
   void _finalizeSet() {
     final loadKg = _loadLbs != null ? _loadLbs! * 0.453592 : null;
-    final summary = MetricsCalculator.buildSetSummary(
+    
+    // First, build a base summary to get the current set's mean MCV
+    SetSummary summary = MetricsCalculator.buildSetSummary(
       _currentReps,
       loadKg: loadKg,
       loadLbs: _loadLbs,
       exercise: _currentExercise,
     );
+
+    // Now, run the Linear Regression Daily 1RM calculation
+    // We need at least 2 points for a line. We combine past sets + this new set.
+    if (_loadLbs != null && _loadLbs! > 0) {
+      // Gather points: X = loadLbs, Y = meanMCV
+      final List<Point<double>> lvpPoints = [];
+      
+      // Add previous completed sets for THIS exercise
+      for (final pastSet in _completedSets) {
+        if (pastSet.exercise == _currentExercise && pastSet.loadLbs != null && pastSet.loadLbs! > 0) {
+          lvpPoints.add(Point(pastSet.loadLbs!, pastSet.meanMCV));
+        }
+      }
+      
+      // Add the current set we just completed
+      lvpPoints.add(Point(_loadLbs!, summary.meanMCV));
+
+      // Calculate personalized 1RM using exercise-specific MVT from research
+      final custom1RM = MetricsCalculator.calculateDaily1RM(
+        points: lvpPoints,
+        exercise: _currentExercise,
+      );
+      
+      // If the regression produced a valid result, override the generalized one
+      if (custom1RM != null) {
+        summary = summary.copyWith(estimated1RMLbs: custom1RM);
+        debugPrint('[SetTracker] Custom Linear Regression 1RM: ${custom1RM.toStringAsFixed(1)} lbs (based on ${lvpPoints.length} points)');
+      } else {
+        debugPrint('[SetTracker] Linear Regression failed (not enough variance/points). Using generalized equation.');
+      }
+    }
+
     _completedSets.add(summary);
     _completedSetVelocitySamples.add(List.from(_currentVelocitySamples));
     _completedSetReps.add(List.from(_currentReps));

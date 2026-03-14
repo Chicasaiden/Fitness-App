@@ -1,5 +1,5 @@
 name: hello_flutter
-description: "A new Flutter project."
+description: "VBT Training App."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -41,10 +41,21 @@ dependencies:
   cloud_firestore: ^6.1.0
   google_sign_in: ^6.2.2
   shared_preferences: ^2.5.4
+  # PDF export
+  pdf: ^3.11.2
+  printing: ^5.13.5
+  # Launch URLs
+  url_launcher: ^6.3.1
+  # Charts
+  fl_chart: ^0.70.0
+  # Haptic feedback
+  vibration: ^2.0.0
+  sign_in_with_apple: ^7.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -52,6 +63,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_native_splash: ^2.4.7
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -67,7 +79,8 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - assets/bulls_logo.png
-
+    - assets/CT FIT.png
+    - assets/CT_FIT_APP.png
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 
@@ -93,3 +106,16 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/CT_FIT_APP.png"
+  min_sdk_android: 21
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: "assets/CT_FIT_APP.png"
+  android_12:
+    image: "assets/CT_FIT_APP.png"
+    icon_background_color: "#ffffff"

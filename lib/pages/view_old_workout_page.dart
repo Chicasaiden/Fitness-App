@@ -36,13 +36,9 @@ class _ViewOldWorkoutPageState extends State<ViewOldWorkoutPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Workout History'),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        centerTitle: true,
       ),
       body: Container(
-        color: Colors.grey.shade50,
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: FutureBuilder<List<Workout>>(
           future: _workoutsFuture,
           builder: (context, snapshot) {
@@ -100,7 +96,7 @@ class _ViewOldWorkoutPageState extends State<ViewOldWorkoutPage> {
             return ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: workouts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final workout = workouts[index];
                 return _WorkoutCard(
@@ -133,17 +129,18 @@ class _WorkoutCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -155,7 +152,7 @@ class _WorkoutCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: Colors.grey.shade100,
+                color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
@@ -163,10 +160,10 @@ class _WorkoutCard extends StatelessWidget {
                 children: [
                   Text(
                     '${workout.date.day}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
-                      color: Colors.black87,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   Text(
@@ -174,7 +171,7 @@ class _WorkoutCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade600,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                     ),
                   ),
                 ],
@@ -190,9 +187,9 @@ class _WorkoutCard extends StatelessWidget {
                 children: [
                   Text(
                     '${_dayName(workout.date.weekday)} at ${workout.formattedTime}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 15,
                     ),
                   ),
@@ -202,7 +199,7 @@ class _WorkoutCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
-                      color: Colors.grey.shade800,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade800,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

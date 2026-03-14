@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:vibration/vibration.dart';
 import '../services/ble_service.dart';
 import '../services/set_tracker.dart';
 import '../services/metrics_calculator.dart';
@@ -8,12 +10,15 @@ import '../models/rep_record.dart';
 import '../models/set_summary.dart';
 import '../ble_metrics.dart';
 import '../repositories/workout_repository.dart';
+import '../repositories/workout_plan_repository.dart';
 import '../models/workout.dart';
+import '../models/workout_plan.dart';
 
 class MetricsDashboardPage extends StatefulWidget {
   final BleService bleService;
   final SetTracker setTracker;
   final WorkoutRepository workoutRepository;
+  final WorkoutPlanRepository? planRepository;
   final String userId;
 
   const MetricsDashboardPage({
@@ -22,6 +27,7 @@ class MetricsDashboardPage extends StatefulWidget {
     required this.setTracker,
     required this.workoutRepository,
     required this.userId,
+    this.planRepository,
   });
 
   @override
@@ -67,6 +73,15 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   // Past workouts
   List<Workout> _pastWorkouts = [];
 
+  // Today's plan (optional)
+  WorkoutPlan? _todaysPlan;
+  bool _planBannerDismissed = false;
+
+  // Rest timer
+  int _restTimerSeconds = 0;    // remaining seconds
+  int _restTimerTotal = 0;      // full duration for the progress ring
+  Timer? _restTimer;
+
   // Exercise filter for trends
   String _trendExerciseFilter = 'All';
 
@@ -76,6 +91,69 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     widget.setTracker.start();
     _setupListeners();
     _loadPastWorkouts();
+    _loadTodaysPlan();
+  }
+
+  Future<void> _loadTodaysPlan() async {
+    if (widget.planRepository == null) return;
+    final plan = await widget.planRepository!.getPlanForDate(
+      widget.userId, DateTime.now(),
+    );
+    if (mounted) setState(() => _todaysPlan = plan);
+  }
+
+  // ─── Rest Timer ───────────────────────────────────────────────────────────
+
+  /// Zone-appropriate rest durations in seconds.
+  static const Map<String, int> _restDurations = {
+    'Strength':     120,
+    'Power':        180,
+    'Hypertrophy':   90,
+  };
+
+  void _startRestTimer({int? seconds}) {
+    _restTimer?.cancel();
+    // Use plan goal zone if available for the selected exercise, else 90s default
+    final planMovement = _todaysPlan?.movements
+        .where((m) => m.exercise == _selectedExercise)
+        .firstOrNull;
+    final duration = seconds ??
+        _restDurations[planMovement?.goalZone ?? ''] ??
+        90;
+    setState(() {
+      _restTimerSeconds = duration;
+      _restTimerTotal = duration;
+    });
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      setState(() => _restTimerSeconds--);
+      if (_restTimerSeconds <= 0) {
+        t.cancel();
+        _onRestComplete();
+      }
+    });
+  }
+
+  void _cancelRestTimer() {
+    _restTimer?.cancel();
+    setState(() { _restTimerSeconds = 0; _restTimerTotal = 0; });
+  }
+
+  Future<void> _onRestComplete() async {
+    final hasVibrator = await Vibration.hasVibrator() == true;
+    if (hasVibrator) Vibration.vibrate(pattern: [0, 400, 200, 400]);
+    if (mounted) {
+      setState(() { _restTimerSeconds = 0; _restTimerTotal = 0; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('✅ Rest complete — start your next set!',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _setupListeners() {
@@ -103,7 +181,10 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
 
     _setSub = widget.setTracker.setStream.listen((_) {
       setState(() {
-        // Set completed — stay on current view
+        // Set completed — clear live velocity data so the next set
+        // starts with a fresh curve instead of overlapping
+        _liveVelocityData.clear();
+        _selectedRepIndex = null;
       });
     });
 
@@ -137,7 +218,6 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   }
 
   void _onEndSetPressed() {
-  void _onEndSetPressed() {
     widget.setTracker.endCurrentSet();
     setState(() {
       _selectedRepIndex = null;
@@ -145,21 +225,15 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
       _liveVelocityData.clear();
       _latestMetrics = null;
     });
-    
-    // Optional tactile feedback
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Set Ended', style: TextStyle(fontWeight: FontWeight.w600)),
-        duration: Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    _startRestTimer(); // Auto-start rest timer
   }
-  }
+
+
 
   void _onFinishWorkout() async {
     // End any active set
     widget.setTracker.endCurrentSet();
+    _cancelRestTimer(); // Stop rest timer if running
 
     final sets = widget.setTracker.completedSets;
     if (sets.isEmpty) {
@@ -170,7 +244,74 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
       return;
     }
 
-    // Show loading indicator
+    // Step 1: Ask for optional session notes in a bottom sheet
+    final notesController = TextEditingController();
+    final shouldSave = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Theme.of(ctx).cardColor,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+              )),
+              const SizedBox(height: 20),
+              const Text('Nice work! 🏋️‍♂️',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              Text('${sets.length} set${sets.length > 1 ? 's' : ''} completed — ready to save.',
+                  style: TextStyle(fontSize: 13, color: isDark ? Colors.grey.shade400 : Colors.grey.shade500)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: notesController,
+                autofocus: false,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: 'Add a note (optional) — how did it feel? Any PRs?',
+                  hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? Theme.of(ctx).colorScheme.primary : Colors.black87,
+                  foregroundColor: isDark ? Theme.of(ctx).colorScheme.onPrimary : Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Save Workout', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text('Discard', style: TextStyle(color: Colors.grey.shade500)),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+    if (shouldSave != true || !mounted) return;
+    final notes = notesController.text.trim();
+
+    // Step 2: Show loading spinner while we save
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -191,7 +332,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
       final pcvs = sets.expand((s) => s.reps.map((r) => r.peakConcentricVelocity)).toList();
       final overallPeakPCV = pcvs.isNotEmpty ? pcvs.reduce((a, b) => a > b ? a : b) : 0.0;
 
-      // Create new workout
+      // Create new workout (with optional notes)
       final workout = Workout(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         userId: widget.userId,
@@ -204,6 +345,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         averageZAcceleration: avgZAccel,
         peakZAcceleration: peakZAccel,
         sets: sets,
+        notes: notes.isNotEmpty ? notes : null,
       );
 
       // Save to repo
@@ -213,7 +355,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         Navigator.pop(context); // pop loading
         Navigator.pop(context); // pop training screen
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Workout saved successfully! 🏋️‍♂️')),
+          const SnackBar(content: Text('Workout saved! 🏋️‍♂️')),
         );
       }
     } catch (e) {
@@ -321,13 +463,11 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Training'),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        centerTitle: true,
       ),
-      backgroundColor: Colors.grey.shade50,
-      body: SingleChildScrollView(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -339,6 +479,12 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             _buildLoadAndNewSetRow(),
             const SizedBox(height: 16),
 
+            // Today's Plan banner (dismissable)
+            if (_todaysPlan != null && _todaysPlan!.hasMovements && !_planBannerDismissed) ...[
+              _buildTodaysPlanBanner(),
+              const SizedBox(height: 16),
+            ],
+
             // Viewing historical set banner
             if (_viewingSetIndex != null) ...[
               _buildHistoricalBanner(),
@@ -348,6 +494,16 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             // Current Velocity & Training Zone
             _buildCurrentVelocityCard(),
             const SizedBox(height: 16),
+
+            // VL% Fatigue threshold warning (only shows when threshold is crossed)
+            _buildVLossWarningBanner(),
+            const SizedBox(height: 16),
+
+            // Rest timer card (auto-starts after ending a set)
+            if (_restTimerSeconds > 0) ...[
+              _buildRestTimerCard(),
+              const SizedBox(height: 16),
+            ],
 
             // Current Set (bar chart — clickable reps) — ABOVE latest rep
             _buildSetBarChart(),
@@ -405,11 +561,176 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           ],
         ),
       ),
+      ),
+    );
+  }
+
+  // ─── Rest Timer Card ───
+  Widget _buildRestTimerCard() {
+    final progress = _restTimerTotal > 0
+        ? _restTimerSeconds / _restTimerTotal
+        : 0.0;
+    final isUrgent = _restTimerSeconds <= 10;
+    final ringColor = isUrgent ? Colors.red.shade400 : Colors.blue.shade500;
+    final mins = _restTimerSeconds ~/ 60;
+    final secs = _restTimerSeconds % 60;
+    final timeStr = mins > 0
+        ? '$mins:${secs.toString().padLeft(2, '0')}'
+        : '${secs}s';
+
+    return _buildCard(
+      child: Row(
+        children: [
+          // Circular progress ring
+          SizedBox(
+            width: 56, height: 56,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 56, height: 56,
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.grey.shade200,
+                    color: ringColor,
+                    strokeWidth: 5,
+                  ),
+                ),
+                Text(
+                  timeStr,
+                  style: TextStyle(
+                    fontSize: mins > 0 ? 12 : 14,
+                    fontWeight: FontWeight.w800,
+                    color: isUrgent ? ringColor : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Rest Period', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text(
+                  isUrgent ? 'Almost time to go!' : 'Recover before your next set',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                ),
+              ],
+            ),
+          ),
+          // Skip button
+          TextButton(
+            onPressed: _cancelRestTimer,
+            style: TextButton.styleFrom(foregroundColor: Colors.grey.shade600),
+            child: const Text('Skip', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Today's Plan Banner ───
+  Widget _buildTodaysPlanBanner() {
+    final movements = _todaysPlan!.movements;
+    final names = movements.map((m) => m.exercise).join(', ');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.assignment_turned_in_outlined, color: Colors.blue.shade700, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Today: $names — tap exercise ↓ to load',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.blue.shade800),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() => _planBannerDismissed = true),
+            child: Icon(Icons.close, size: 16, color: Colors.blue.shade400),
+          ),
+        ],
+      ),
     );
   }
 
   // ─── Exercise Dropdown Row ───
   Widget _buildExerciseRow() {
+    final plan = _todaysPlan;
+    final planMovements = plan?.movements ?? [];
+
+    // Build dropdown items: plan exercises first (if any), then all exercises
+    final List<DropdownMenuItem<String>> items = [];
+
+    if (planMovements.isNotEmpty) {
+      items.add(const DropdownMenuItem<String>(
+        enabled: false,
+        value: '__header_plan__',
+        child: Text('\u2014 From Today\'s Plan —',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.blueAccent)),
+      ));
+      for (final m in planMovements) {
+        final loadStr = m.effectiveLoadLbs != null
+            ? ' (${m.effectiveLoadLbs!.toStringAsFixed(1)} lbs)'
+            : '';
+        items.add(DropdownMenuItem<String>(
+          value: m.exercise,
+          child: Text(
+            '\u2022 ${m.exercise}$loadStr',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
+          ),
+        ));
+      }
+      items.add(const DropdownMenuItem<String>(
+        enabled: false,
+        value: '__header_all__',
+        child: Text('\u2014 All Exercises —',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey)),
+      ));
+    }
+    for (final e in _exercises) {
+      // Skip exercises already shown in plan section
+      final alreadyInPlan = planMovements.any((m) => m.exercise == e);
+      if (alreadyInPlan) continue;
+      items.add(DropdownMenuItem<String>(
+        value: e,
+        child: Text(e, style: const TextStyle(fontSize: 13)),
+      ));
+    }
+
+    void onExerciseChanged(String? v) {
+      if (v == null || v.startsWith('__header_')) return;
+      widget.setTracker.endCurrentSet();
+      setState(() {
+        _selectedExercise = v;
+        _selectedRepIndex = null;
+        _viewingSetIndex = null;
+        _liveVelocityData.clear();
+        _latestMetrics = null;
+        _showRepFlash = false;
+        _repFlashColor = null;
+        // Pre-fill load from plan if available
+        final match = planMovements.where((m) => m.exercise == v).firstOrNull;
+        if (match?.effectiveLoadLbs != null) {
+          _loadLbs = match!.effectiveLoadLbs;
+          _loadController.text = match.effectiveLoadLbs!.toStringAsFixed(1);
+          widget.setTracker.setLoad(_loadLbs);
+        }
+      });
+      widget.setTracker.clearLastCompletedRep();
+      widget.setTracker.setExercise(v);
+    }
+
     return _buildCard(
       child: Row(
         children: [
@@ -419,32 +740,21 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           const SizedBox(width: 12),
           Expanded(
             child: DropdownButtonFormField<String>(
-              value: _selectedExercise,
+              initialValue: _selectedExercise,
               decoration: InputDecoration(
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               ),
-              items: _exercises.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13)))).toList(),
-              onChanged: (v) {
-                // Auto-end the current set BEFORE changing the exercise
-                // so previous reps don't get mislabeled.
-                widget.setTracker.endCurrentSet();
-                setState(() {
-                  _selectedExercise = v!;
-                  _selectedRepIndex = null;
-                  _viewingSetIndex = null;
-                  _liveVelocityData.clear();
-                  _latestMetrics = null;
-                });
-                widget.setTracker.setExercise(v!);
-              },
+              items: items,
+              onChanged: onExerciseChanged,
             ),
           ),
         ],
       ),
     );
   }
+
 
   // ─── Load Input + New Set Button ───
   Widget _buildLoadAndNewSetRow() {
@@ -532,12 +842,74 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     );
   }
 
+  // ─── Velocity Loss % Fatigue Warning Banner ───
+  Widget _buildVLossWarningBanner() {
+    final reps = widget.setTracker.currentReps;
+    if (reps.length < 2 || _viewingSetIndex != null) return const SizedBox.shrink();
+
+    final vloss = MetricsCalculator.velocityLoss(reps);
+    final zone = MetricsCalculator.velocityZone(
+      reps.first.meanConcentricVelocity,
+    );
+
+    // Research-backed thresholds per zone:
+    // Power/Speed → stop at 20%, Strength → stop at 30%
+    final double warningThreshold;
+    final double dangerThreshold;
+    if (zone == VelocityZone.power || zone == VelocityZone.speed) {
+      warningThreshold = 15.0; // early warning for explosive work
+      dangerThreshold  = 20.0; // González-Badillo: stop here for power
+    } else {
+      warningThreshold = 20.0;
+      dangerThreshold  = 30.0; // Science for Sport: 30% for strength
+    }
+
+    if (vloss < warningThreshold) return const SizedBox.shrink();
+
+    final bool isDanger = vloss >= dangerThreshold;
+    final Color bgColor = isDanger ? Colors.red.shade50 : Colors.orange.shade50;
+    final Color borderColor = isDanger ? Colors.red.shade300 : Colors.orange.shade300;
+    final Color textColor = isDanger ? Colors.red.shade800 : Colors.orange.shade800;
+    final IconData icon = isDanger ? Icons.warning_rounded : Icons.warning_amber_rounded;
+    final String message = isDanger
+        ? 'Velocity Loss ${vloss.toStringAsFixed(0)}% — Recommend ending set now!'
+        : 'Velocity Loss ${vloss.toStringAsFixed(0)}% — Approaching fatigue threshold';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: textColor, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ─── Current Velocity & Zone ───
   Widget _buildCurrentVelocityCard() {
     final vz = _latestMetrics?.currentVelocity;
     final mcv = _latestMetrics?.meanConcentricVelocity ?? 0.0;
-    final zone = MetricsCalculator.velocityZone(mcv);
-    final zoneColor = Color(MetricsCalculator.zoneColorValue(zone));
+
 
     // If viewing historical, show set's mean MCV zone
     final displayMCV = _viewingSetIndex != null ? (_displaySetSummary?.meanMCV ?? 0.0) : mcv;
@@ -551,14 +923,14 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           Row(
             children: [
               Text(_viewingSetIndex != null ? 'Set Velocity Zone' : 'Current Velocity',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: displayZoneColor.withOpacity(0.15),
+                  color: displayZoneColor.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: displayZoneColor.withOpacity(0.4)),
+                  border: Border.all(color: displayZoneColor.withValues(alpha: 0.4)),
                 ),
                 child: Text(MetricsCalculator.zoneLabel(displayZone),
                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: displayZoneColor)),
@@ -578,8 +950,8 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                   fontSize: 36,
                   fontWeight: FontWeight.w800,
                   color: _showRepFlash && _viewingSetIndex == null
-                      ? (_repFlashColor ?? Colors.black87)
-                      : Colors.black87,
+                      ? (_repFlashColor ?? Theme.of(context).colorScheme.onSurface)
+                      : Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 6),
@@ -638,7 +1010,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
           Row(
             children: [
               Text(_viewingSetIndex != null ? 'Set ${_viewingSetIndex! + 1}' : 'Current Set',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               if (isLive) ...[
                 const SizedBox(width: 8),
                 Container(
@@ -719,15 +1091,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     );
   }
 
-  Widget _miniStat(String label, String value) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('$label: ', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-        Text(value, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black87)),
-      ],
-    );
-  }
+
 
   // ─── Rep Detail Card (shows selected or latest rep) ───
   Widget _buildRepDetailCard() {
@@ -741,7 +1105,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             children: [
               Text(
                 _selectedRepIndex != null ? 'Rep Detail' : 'Latest Rep',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
               ),
               const Spacer(),
               if (rep != null)
@@ -789,7 +1153,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         children: [
           Row(
             children: [
-              const Text('Velocity Curve', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+              Text('Velocity Curve', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               const Spacer(),
               if (!widget.setTracker.isSetActive && _viewingSetIndex == null)
                 Container(
@@ -815,24 +1179,29 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   }
 
   // ─── PR Detection ───
+  /// Compares [s] only against sets for the same exercise,
+  /// so a squat PR does not light up during a bench press session.
   Map<String, bool> _detectPRs(SetSummary s) {
     final prs = <String, bool>{'mcv': false, 'pcv': false, 'rom': false};
-    // Collect all set MCVs from past workouts
     double bestMCV = 0, bestPCV = 0, bestROM = 0;
+    final exercise = s.exercise.toLowerCase().trim();
+
+    // Past workouts — filter by matching exercise
     for (final w in _pastWorkouts) {
       for (final set in w.sets) {
+        if (set.exercise.toLowerCase().trim() != exercise) continue;
         if (set.bestMCV > bestMCV) bestMCV = set.bestMCV;
         if (set.meanPCV > bestPCV) bestPCV = set.meanPCV;
         if (set.meanROM > bestROM) bestROM = set.meanROM;
       }
     }
-    // Also check completed sets from current session
+    // Current session — also filter by exercise, exclude s itself
     for (final set in widget.setTracker.completedSets) {
-      if (set != s) {
-        if (set.bestMCV > bestMCV) bestMCV = set.bestMCV;
-        if (set.meanPCV > bestPCV) bestPCV = set.meanPCV;
-        if (set.meanROM > bestROM) bestROM = set.meanROM;
-      }
+      if (set == s) continue;
+      if (set.exercise.toLowerCase().trim() != exercise) continue;
+      if (set.bestMCV > bestMCV) bestMCV = set.bestMCV;
+      if (set.meanPCV > bestPCV) bestPCV = set.meanPCV;
+      if (set.meanROM > bestROM) bestROM = set.meanROM;
     }
     prs['mcv'] = s.bestMCV > bestMCV && bestMCV > 0;
     prs['pcv'] = s.meanPCV > bestPCV && bestPCV > 0;
@@ -880,12 +1249,15 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
 
   /// Enhanced metric mini with optional PR badge, trend arrow, and subtitle
   Widget _metricMiniEnhanced(String title, String value, String unit, {bool isPR = false, double? trend, String? subtitle}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: isPR ? Colors.amber.shade50 : Colors.grey.shade50,
+        color: isPR ? (isDark ? Colors.amber.shade900.withValues(alpha: 0.3) : Colors.amber.shade50) 
+                    : (isDark ? Colors.grey.shade800 : Colors.grey.shade50),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: isPR ? Colors.amber.shade300 : Colors.grey.shade200),
+        border: Border.all(color: isPR ? (isDark ? Colors.amber.shade700 : Colors.amber.shade300) 
+                                       : (isDark ? Colors.grey.shade700 : Colors.grey.shade200)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -893,7 +1265,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         children: [
           Row(
             children: [
-              Expanded(child: Text(title, style: TextStyle(fontSize: 9, color: Colors.grey.shade600, fontWeight: FontWeight.w500))),
+              Expanded(child: Text(title, style: TextStyle(fontSize: 9, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontWeight: FontWeight.w500))),
               if (isPR) _prBadge(),
             ],
           ),
@@ -907,7 +1279,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: Text(value,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.black87)),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
                 ),
               ),
               const SizedBox(width: 2),
@@ -935,7 +1307,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         children: [
           Row(
             children: [
-              const Text('Set Summary', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+              Text('Set Summary', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               if (prs.values.any((v) => v)) ...[
                 const SizedBox(width: 8),
                 Container(
@@ -979,6 +1351,12 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
               _metricMiniEnhanced('Mean ROM', (s.meanROM * 100).toStringAsFixed(1), 'cm', isPR: prs['rom']!),
               _metricMini('Mean Accel', s.meanAvgZAccel.toStringAsFixed(2), 'm/s²'),
               _metricMini('Peak Accel', s.meanPeakZAccel.toStringAsFixed(2), 'm/s²'),
+              // V-Loss and Fatigue: set quality metrics, grouped here logically
+              _metricMiniEnhanced('V-Loss', s.velocityLossPercent.toStringAsFixed(1), '%',
+                  subtitle: s.reps.length >= 2
+                      ? '${s.reps.first.meanConcentricVelocity.toStringAsFixed(2)} → ${s.reps.last.meanConcentricVelocity.toStringAsFixed(2)} m/s'
+                      : null),
+              _metricMini('Fatigue', s.fatigueIndex.toStringAsFixed(0), '/100'),
             ],
           ),
         ],
@@ -986,49 +1364,32 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
     );
   }
 
-  // ─── Power, Strength & Fatigue ───
+  // ─── Power, Strength Estimates (only appears when load is entered) ───
   Widget _buildPowerEstimatesCard(SetSummary s) {
+    if (s.loadLbs == null || s.estimated1RMLbs == null) return const SizedBox.shrink();
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Power & Strength Estimates', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+          Text('Power & Strength Estimates', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
+          const SizedBox(height: 8),
+          Text('Based on ${s.loadLbs!.toStringAsFixed(1)} lbs • Set mean MCV',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
           const SizedBox(height: 12),
-          // V-Loss and Fatigue (always shown)
           GridView.count(
-            crossAxisCount: 2,
+            crossAxisCount: 3,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            childAspectRatio: 1.8, // Adjusted from 2.2 to accommodate subtitle
+            childAspectRatio: 1.1,
             children: [
-              _metricMiniEnhanced('V-Loss', s.velocityLossPercent.toStringAsFixed(1), '%', 
-                                  subtitle: s.reps.length >= 2 ? '${s.reps.first.meanConcentricVelocity.toStringAsFixed(2)} → ${s.reps.last.meanConcentricVelocity.toStringAsFixed(2)} m/s' : null),
-              _metricMini('Fatigue', s.fatigueIndex.toStringAsFixed(0), '/100'),
+              _metricMini('Est. 1RM', s.estimated1RMLbs!.toStringAsFixed(1), 'lbs'),
+              _metricMini('Mean Power', s.estimatedMeanPower?.toStringAsFixed(0) ?? '--', 'W'),
+              _metricMini('Peak Power', s.estimatedPeakPower?.toStringAsFixed(0) ?? '--', 'W'),
+              _metricMini('Impulse', s.impulse?.toStringAsFixed(1) ?? '--', 'N·s'),
             ],
           ),
-          // Power / 1RM estimates (only if load was entered)
-          if (s.loadLbs != null && s.estimated1RMLbs != null) ...[
-            const SizedBox(height: 8),
-            Text('Based on ${s.loadLbs!.toStringAsFixed(1)} lbs • Set mean MCV',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            const SizedBox(height: 8),
-            GridView.count(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.1, // Adjusted from 1.4
-              children: [
-                _metricMini('Est. 1RM', s.estimated1RMLbs!.toStringAsFixed(1), 'lbs'),
-                _metricMini('Mean Power', s.estimatedMeanPower?.toStringAsFixed(0) ?? '--', 'W'),
-                _metricMini('Peak Power', s.estimatedPeakPower?.toStringAsFixed(0) ?? '--', 'W'),
-                _metricMini('Impulse', s.impulse?.toStringAsFixed(1) ?? '--', 'N·s'),
-              ],
-            ),
-          ],
           if (s.suggestedNextLoad != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -1059,6 +1420,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   // ─── Session History (clickable sets) ───
   Widget _buildSessionHistoryCard() {
     final sets = widget.setTracker.completedSets;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     // Group sets by exercise while retaining their absolute index for selection
     final groupedSets = <String, List<MapEntry<int, SetSummary>>>{};
@@ -1076,8 +1438,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Session History (${sets.length} sets)',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
-          const SizedBox(height: 12),
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
           ...groupedSets.entries.expand((group) {
             final exerciseName = group.key;
             final entries = group.value;
@@ -1087,7 +1448,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                 padding: const EdgeInsets.only(left: 4, top: 4, bottom: 8),
                 child: Text(
                   exerciseName,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.black87),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface),
                 ),
               ),
               ...entries.asMap().entries.map((relativeEntry) {
@@ -1104,16 +1465,16 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                       duration: const Duration(milliseconds: 200),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isViewing ? Colors.blue.shade50 : Colors.grey.shade50,
+                        color: isViewing ? Colors.blue.withValues(alpha: isDark ? 0.2 : 0.05) : (isDark ? Colors.transparent : Colors.grey.shade50),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: isViewing ? Colors.blue.shade400 : Colors.grey.shade200, width: isViewing ? 2 : 1),
+                        border: Border.all(color: isViewing ? Colors.blue.shade400 : (isDark ? Colors.grey.shade800 : Colors.grey.shade200), width: isViewing ? 2 : 1),
                       ),
                       child: Row(
                         children: [
                           Container(
                             width: 28, height: 28,
                             decoration: BoxDecoration(
-                              color: isViewing ? Colors.blue.shade600 : Colors.black87,
+                              color: isViewing ? Colors.blue.shade600 : (isDark ? Colors.grey.shade800 : Colors.black87),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Center(
@@ -1129,14 +1490,14 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
                                 Text('${s.totalReps} reps • MCV: ${s.meanMCV.toStringAsFixed(2)} m/s',
                                     style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                                 Text(
-                                  'V-Loss: ${s.velocityLossPercent.toStringAsFixed(1)}% • Fatigue: ${s.fatigueIndex.toStringAsFixed(0)}/100'
+                                  'V-Loss: ${s.velocityLossPercent.toStringAsFixed(1)}% • Fatigue: ${s.fatigueIndex.toStringAsFixed(0)}/100\n'
                                   '${s.estimated1RMLbs != null ? ' • 1RM: ${s.estimated1RMLbs!.toStringAsFixed(0)} lbs' : ''}',
-                                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                  style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                 ),
                               ],
                             ),
                           ),
-                          Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 18),
+                          Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400, size: 18),
                         ],
                       ),
                     ),
@@ -1145,7 +1506,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
               }),
               const SizedBox(height: 8),
             ];
-          }).toList(),
+          }),
         ],
       ),
     );
@@ -1174,13 +1535,13 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
         children: [
           Row(
             children: [
-              const Text('Workout Trends', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87)),
+              Text('Workout Trends', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Theme.of(context).colorScheme.onSurface)),
               const Spacer(),
               if (exercises.length > 1)
                 SizedBox(
                   width: 120,
                   child: DropdownButtonFormField<String>(
-                    value: _trendExerciseFilter,
+                    initialValue: _trendExerciseFilter,
                     decoration: InputDecoration(
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1230,11 +1591,12 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
 
   // ─── Reusable Components ───
   Widget _buildCard({required Widget child}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       padding: const EdgeInsets.all(16),
       child: child,
@@ -1242,18 +1604,19 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
   }
 
   Widget _metricMini(String title, String value, String unit) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: isDark ? Colors.grey.shade800 : Colors.grey.shade50,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: isDark ? Colors.grey.shade700 : Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(title, style: TextStyle(fontSize: 9, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
+          Text(title, style: TextStyle(fontSize: 9, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontWeight: FontWeight.w500)),
           const SizedBox(height: 3),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -1261,7 +1624,7 @@ class _MetricsDashboardPageState extends State<MetricsDashboardPage> {
             children: [
               Flexible(
                 child: Text(value,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.black87),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
                     overflow: TextOverflow.ellipsis),
               ),
               const SizedBox(width: 2),

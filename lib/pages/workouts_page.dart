@@ -30,9 +30,6 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Workouts & Data'),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
         centerTitle: true,
       ),
       body: FutureBuilder<List<Workout>>(
@@ -62,7 +59,7 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -81,15 +78,16 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final workout = workouts[index];
+              final isDark = Theme.of(context).brightness == Brightness.dark;
               return Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
@@ -110,9 +108,9 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
                   ),
                   title: Text(
                     '${workout.formattedDate} at ${workout.formattedTime}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 14,
                     ),
                   ),

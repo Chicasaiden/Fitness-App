@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../repositories/workout_repository.dart';
+import '../repositories/workout_plan_repository.dart';
+import '../repositories/firestore_workout_plan_repository.dart';
 import '../models/workout.dart';
+import '../models/workout_plan.dart';
 import 'plan_workout_page.dart';
 
 /// Calendar page showing a monthly view with workout indicators.
@@ -17,11 +20,13 @@ import 'plan_workout_page.dart';
 class CalendarPage extends StatefulWidget {
   final WorkoutRepository workoutRepository;
   final String userId;
+  final WorkoutPlanRepository? planRepository;
 
   const CalendarPage({
     super.key,
     required this.workoutRepository,
     required this.userId,
+    this.planRepository,
   });
 
   @override
@@ -34,11 +39,16 @@ class _CalendarPageState extends State<CalendarPage> {
   List<Workout> _allWorkouts = [];
   bool _isLoading = true;
 
+  /// Date keys (YYYYMMDD) with saved plans.
+  final Set<String> _plannedDateKeys = {};
+  final Map<String, WorkoutPlan> _planCache = {};
+
   @override
   void initState() {
     super.initState();
     _currentMonth = DateTime(_today.year, _today.month, 1);
     _loadWorkouts();
+    _loadPlans();
   }
 
   Future<void> _loadWorkouts() async {
@@ -49,6 +59,29 @@ class _CalendarPageState extends State<CalendarPage> {
       _isLoading = false;
     });
   }
+
+  Future<void> _loadPlans() async {
+    final repo = widget.planRepository ?? FirestoreWorkoutPlanRepository();
+    final plans = await repo.getAllPlans(widget.userId);
+    if (!mounted) return;
+    final keys = <String>{};
+    final cache = <String, WorkoutPlan>{};
+    for (final p in plans) {
+      final key = '${p.date.year}${p.date.month.toString().padLeft(2,'0')}${p.date.day.toString().padLeft(2,'0')}';
+      keys.add(key);
+      cache[key] = p;
+    }
+    setState(() {
+      _plannedDateKeys.clear();
+      _plannedDateKeys.addAll(keys);
+      _planCache
+        ..clear()
+        ..addAll(cache);
+    });
+  }
+
+  String _dateKey(DateTime d) =>
+      '${d.year}${d.month.toString().padLeft(2,'0')}${d.day.toString().padLeft(2,'0')}';
 
   /// Get workouts for a specific date.
   List<Workout> _workoutsOnDate(DateTime date) {
@@ -160,7 +193,7 @@ class _CalendarPageState extends State<CalendarPage> {
     ).length;
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade50,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
@@ -168,52 +201,23 @@ class _CalendarPageState extends State<CalendarPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
-                // ── Big Date Header ──────────────────────────────
+                // ── Big Date Header ───────────────────────────────
                 _buildDateHeader(streak, monthWorkouts),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
                 // ── Calendar Grid ────────────────────────────────
                 _buildCalendar(),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
                 // ── Weekly Comparison Strip ──────────────────────
                 _buildWeeklyStrip(comparison),
 
                 const SizedBox(height: 20),
 
-                // ── Plan Workout Button ──────────────────────────
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PlanWorkoutPage(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.add, size: 22),
-                    label: const Text(
-                      'Plan Workout',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black87,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -236,10 +240,10 @@ class _CalendarPageState extends State<CalendarPage> {
         // Big month name
         Text(
           months[_today.month - 1],
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 34,
             fontWeight: FontWeight.w800,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
             letterSpacing: -0.5,
           ),
         ),
@@ -253,7 +257,7 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
         const SizedBox(height: 14),
 
-        // Stats row: streak + month count
+        // Stats row: streak + month count + plan button
         Row(
           children: [
             // Weekly streak
@@ -304,6 +308,31 @@ class _CalendarPageState extends State<CalendarPage> {
                 ),
               ),
             ),
+            const Spacer(),
+            // Small plan workout button (for today)
+            GestureDetector(
+              onTap: () async {
+                final workouts = await widget.workoutRepository.getWorkoutsByUserId(widget.userId);
+                if (!mounted) return;
+                final repo = widget.planRepository ?? FirestoreWorkoutPlanRepository();
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => PlanWorkoutPage(
+                    planRepository: repo,
+                    userId: widget.userId,
+                    date: DateTime.now(),
+                    pastWorkouts: workouts,
+                  ),
+                )).then((_) => _loadPlans());
+              },
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.add, color: Colors.white, size: 18),
+              ),
+            ),
           ],
         ),
       ],
@@ -313,15 +342,16 @@ class _CalendarPageState extends State<CalendarPage> {
   // ── Calendar Grid ───────────────────────────────────────────────────
 
   Widget _buildCalendar() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
             blurRadius: 10,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -356,10 +386,10 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
         Text(
           '${months[_currentMonth.month - 1]} ${_currentMonth.year}',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
-            color: Colors.black87,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         IconButton(
@@ -412,12 +442,15 @@ class _CalendarPageState extends State<CalendarPage> {
 
       cells.add(
         GestureDetector(
-          onTap: isFuture ? null : () => _onDayTapped(date, workouts),
+          onTap: isFuture
+              ? () => _showPlanWorkout(date)
+              : () => _onDayTapped(date, workouts),
           child: _DayCell(
             day: day,
             isToday: isToday,
             isFuture: isFuture,
             hasWorkout: workouts.isNotEmpty,
+            hasPlan: _plannedDateKeys.contains(_dateKey(date)),
             intensity: _workoutIntensity(workouts),
           ),
         ),
@@ -456,6 +489,94 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  /// Show plan workout sheet when tapping a future date.
+  void _showPlanWorkout(DateTime date) {
+    final key = _dateKey(date);
+    final existingPlan = _planCache[key];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSheetHandle(),
+            const SizedBox(height: 16),
+            Icon(Icons.event, size: 40, color: Colors.blue.shade300),
+            const SizedBox(height: 12),
+            Text(
+              '${_dayName(date.weekday)}, ${_monthAbbrev(date.month)} ${date.day}',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              existingPlan != null
+                  ? '${existingPlan.movements.length} exercise${existingPlan.movements.length != 1 ? 's' : ''} planned'
+                  : 'No workout planned yet',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
+            ),
+            // Show planned movements if a plan exists
+            if (existingPlan != null && existingPlan.movements.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ...existingPlan.movements.map((m) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Container(width: 8, height: 8,
+                        margin: const EdgeInsets.only(right: 10, top: 1),
+                        decoration: BoxDecoration(color: Colors.blue.shade400, shape: BoxShape.circle)),
+                    Expanded(child: Text(m.exercise,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+                    Text('${m.targetSets}×${m.targetReps}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                  ],
+                ),
+              )),
+            ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final workouts = await widget.workoutRepository.getWorkoutsByUserId(widget.userId);
+                  if (!mounted) return;
+                  final repo = widget.planRepository ?? FirestoreWorkoutPlanRepository();
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => PlanWorkoutPage(
+                      planRepository: repo,
+                      userId: widget.userId,
+                      date: date,
+                      pastWorkouts: workouts,
+                      initialPlan: existingPlan,
+                    ),
+                  )).then((_) => _loadPlans());
+                },
+                icon: Icon(existingPlan != null ? Icons.edit : Icons.add, size: 20),
+                label: Text(
+                  existingPlan != null ? 'Edit Plan' : 'Plan Workout',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black87,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Show workout summary for a specific day.
   void _showWorkoutSummary(DateTime date, List<Workout> workouts) {
     showModalBottomSheet(
@@ -467,9 +588,9 @@ class _CalendarPageState extends State<CalendarPage> {
         minChildSize: 0.3,
         maxChildSize: 0.85,
         builder: (context, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
             children: [
@@ -483,10 +604,10 @@ class _CalendarPageState extends State<CalendarPage> {
                       children: [
                         Text(
                           '${_dayName(date.weekday)}, ${_monthAbbrev(date.month)} ${date.day}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -680,16 +801,17 @@ class _CalendarPageState extends State<CalendarPage> {
     final thisWeek = comparison['thisWeek'] ?? 0;
     final lastWeek = comparison['lastWeek'] ?? 0;
     final diff = thisWeek - lastWeek;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -702,10 +824,10 @@ class _CalendarPageState extends State<CalendarPage> {
               children: [
                 Text(
                   '$thisWeek',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 Text(
@@ -749,10 +871,10 @@ class _CalendarPageState extends State<CalendarPage> {
               children: [
                 Text(
                   '$lastWeek',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
-                    color: Colors.black87,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 Text(
@@ -825,6 +947,7 @@ class _DayCell extends StatelessWidget {
   final bool isToday;
   final bool isFuture;
   final bool hasWorkout;
+  final bool hasPlan;
   final double intensity; // 0.0 to 1.0
 
   const _DayCell({
@@ -832,6 +955,7 @@ class _DayCell extends StatelessWidget {
     required this.isToday,
     required this.isFuture,
     required this.hasWorkout,
+    required this.hasPlan,
     required this.intensity,
   });
 
@@ -849,7 +973,7 @@ class _DayCell extends StatelessWidget {
       margin: const EdgeInsets.all(1),
       decoration: BoxDecoration(
         color: isToday
-            ? Colors.black87
+            ? Theme.of(context).colorScheme.primary
             : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
       ),
@@ -862,23 +986,39 @@ class _DayCell extends StatelessWidget {
               fontSize: 14,
               fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
               color: isToday
-                  ? Colors.white
+                  ? Theme.of(context).colorScheme.onPrimary
                   : isFuture
                       ? Colors.grey.shade300
-                      : Colors.black87,
+                      : Theme.of(context).colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 2),
-          // Workout indicator dot
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: hasWorkout
-                  ? (isToday ? Colors.white : dotColor)
-                  : Colors.transparent,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Green workout dot
+              Container(
+                width: 6, height: 6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: hasWorkout
+                      ? (isToday ? Colors.white : dotColor)
+                      : Colors.transparent,
+                ),
+              ),
+              // Blue plan pencil dot (only when no workout yet or future)
+              if (hasPlan) ...[
+                const SizedBox(width: 3),
+                Container(
+                  width: 5, height: 5,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isToday ? Colors.blue.shade200 : Colors.blue.shade400,
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

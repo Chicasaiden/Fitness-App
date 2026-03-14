@@ -1,0 +1,19 @@
+﻿Analyzing hello_flutter...                                      
+
+warning - The value of the local variable 'zone' isn't used - lib\pages\metrics_dashboard_page.dart:913:11 - unused_local_variable
+warning - Dead code - lib\pages\settings_page.dart:402:41 - dead_code
+  error - The named parameter 'child' is required, but there's no corresponding argument - lib\pages\settings_page.dart:405:15 - missing_required_argument
+  error - The argument type 'bool' can't be assigned to the parameter type 'VoidCallback?'.  - lib\pages\settings_page.dart:406:28 - argument_type_not_assignable
+  error - Expected to find ')' - lib\pages\settings_page.dart:407:21 - expected_token
+warning - The '!' will have no effect because the receiver can't be null - lib\repositories\firestore_workout_plan_repository.dart:82:50 - unnecessary_non_null_assertion
+
+flutter : 6 issues found. (ran in 16.5s)
+At line:1 char:1
++ flutter analyze 2>&1 | Out-File -FilePath 
+"C:\Users\Aiden\develop\app ...
++ ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (6 i 
+   ssues found. (ran in 16.5s):String) [], Remo  
+  teException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

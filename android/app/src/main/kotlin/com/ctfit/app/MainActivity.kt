@@ -1,4 +1,4 @@
-package com.example.hello_flutter
+package com.ctfit.app
 
 import io.flutter.embedding.android.FlutterActivity
 

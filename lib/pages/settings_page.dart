@@ -1,8 +1,12 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:printing/printing.dart';
 import '../services/auth_service.dart';
+import '../services/pdf_export_service.dart';
+import '../services/theme_service.dart';
 import '../repositories/workout_repository.dart';
+import 'privacy_policy_page.dart';
 
 /// Settings page with user profile, weekly goal, units preference, and data export.
 class SettingsPage extends StatefulWidget {
@@ -67,7 +71,7 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _exportDataCSV() async {
+  Future<void> _exportPDF() async {
     if (widget.workoutRepository == null || widget.userId == null) return;
     setState(() => _isExporting = true);
 
@@ -82,54 +86,18 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      // Build CSV content
-      final buffer = StringBuffer();
-      buffer.writeln('Date,Duration (s),Mean MCV (m/s),Peak MCV (m/s),TUT (s),ROM (m),Sets,Exercise,Notes');
-      for (final w in workouts) {
-        final exercises = w.sets.map((s) => s.exercise).toSet().join('; ');
-        buffer.writeln(
-          '${w.date.toIso8601String().split("T")[0]},'
-          '${w.duration.toStringAsFixed(1)},'
-          '${w.meanConcentricVelocity.toStringAsFixed(3)},'
-          '${w.peakConcentricVelocity.toStringAsFixed(3)},'
-          '${w.timeUnderTension.toStringAsFixed(1)},'
-          '${w.rangeOfMotion.toStringAsFixed(3)},'
-          '${w.sets.length},'
-          '$exercises,'
-          '${w.notes ?? ""}'
+      final pdf = PdfExportService.generateReport(workouts);
+
+      if (mounted) {
+        await Printing.layoutPdf(
+          onLayout: (_) => pdf.save(),
+          name: 'VBT_Workout_Report',
         );
       }
-
-      // Show in a dialog since we can't easily write to file on all platforms
+    } catch (e) {
       if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Row(
-              children: [
-                Icon(Icons.table_chart, color: Colors.green.shade600),
-                const SizedBox(width: 10),
-                const Text('Export Data', style: TextStyle(fontWeight: FontWeight.w700)),
-              ],
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 300,
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  buffer.toString(),
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating PDF: $e')),
         );
       }
     } finally {
@@ -140,36 +108,36 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final currentUser = widget.authService.currentUser;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        centerTitle: true,
       ),
       body: Container(
-        color: Colors.grey.shade50,
+        color: theme.scaffoldBackgroundColor,
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           child: Column(
             children: [
               // ── USER PROFILE ─────────────────────────
               _buildCard(
+                context,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('User Profile', style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                    Text('User Profile', style: TextStyle(fontSize: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 8),
                     Text(
                       currentUser?.displayName ?? 'No user logged in',
-                      style: const TextStyle(color: Colors.black87, fontSize: 20, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: colorScheme.onSurface, fontSize: 20, fontWeight: FontWeight.w600),
                     ),
                     if (currentUser?.email != null && currentUser!.email.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
-                        child: Text(currentUser.email, style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                        child: Text(currentUser.email, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 14)),
                       ),
                   ],
                 ),
@@ -179,10 +147,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // ── WEEKLY GOAL ──────────────────────────
               _buildCard(
+                context,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Weekly Goal', style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                    Text('Weekly Goal', style: TextStyle(fontSize: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -201,7 +170,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w800,
-                                  color: _thisWeekCount >= _weeklyGoal ? Colors.green.shade700 : Colors.black87,
+                                  color: _thisWeekCount >= _weeklyGoal ? Colors.green.shade400 : (isDark ? Colors.white : Colors.black87),
                                 ),
                               ),
                             ),
@@ -217,16 +186,16 @@ class _SettingsPageState extends State<SettingsPage> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
-                                  color: _thisWeekCount >= _weeklyGoal ? Colors.green.shade700 : Colors.black87,
+                                  color: _thisWeekCount >= _weeklyGoal ? Colors.green.shade400 : (isDark ? Colors.white : Colors.black87),
                                 ),
                               ),
                               const SizedBox(height: 8),
                               Row(
                                 children: [
-                                  Text('Target:', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                  Text('Target:', style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600)),
                                   const SizedBox(width: 6),
-                                  _goalButton(1), _goalButton(2), _goalButton(3),
-                                  _goalButton(4), _goalButton(5), _goalButton(6),
+                                  _goalButton(context, 1), _goalButton(context, 2), _goalButton(context, 3),
+                                  _goalButton(context, 4), _goalButton(context, 5), _goalButton(context, 6),
                                 ],
                               ),
                             ],
@@ -242,16 +211,17 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // ── PREFERENCES ──────────────────────────
               _buildCard(
+                context,
                 child: Column(
                   children: [
                     // Units Toggle
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.straighten, color: Colors.grey.shade600),
+                      leading: Icon(Icons.straighten, color: isDark ? colorScheme.primary : Colors.grey.shade600),
                       title: const Text('Units', style: TextStyle(fontWeight: FontWeight.w600)),
                       subtitle: Text(
                         _useMetric ? 'Metric (kg, cm)' : 'Imperial (lbs, in)',
-                        style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                        style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 13),
                       ),
                       trailing: Switch(
                         value: _useMetric,
@@ -259,40 +229,68 @@ class _SettingsPageState extends State<SettingsPage> {
                         activeThumbColor: Colors.blue,
                       ),
                     ),
-                    Divider(height: 1, color: Colors.grey.shade200),
+                    Divider(height: 1, color: theme.dividerColor),
 
-                    // Export Data
+                    // Dark Mode Toggle
+                    ListenableBuilder(
+                      listenable: ThemeService.instance,
+                      builder: (context, _) {
+                        final isDark = ThemeService.instance.isDark;
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            isDark ? Icons.dark_mode : Icons.light_mode,
+                            color: isDark ? Colors.indigo.shade300 : Colors.amber.shade600,
+                          ),
+                          title: const Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(
+                            isDark ? 'Dark theme active' : 'Light theme active',
+                            style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 13),
+                          ),
+                          trailing: Switch(
+                            value: isDark,
+                            onChanged: (_) => ThemeService.instance.toggle(),
+                           activeThumbColor: Colors.indigo,
+                          ),
+                        );
+                      },
+                    ),
+                    Divider(height: 1, color: theme.dividerColor),
+
+                    // Export as PDF
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.download, color: Colors.grey.shade600),
-                      title: const Text('Export Data', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text('Export workout history as CSV', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                      leading: Icon(Icons.picture_as_pdf, color: Colors.red.shade400),
+                      title: const Text('Export as PDF', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text('Generate workout report with velocity curves', style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 13)),
                       trailing: _isExporting
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                      onTap: _isExporting ? null : _exportDataCSV,
+                          : Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
+                      onTap: _isExporting ? null : _exportPDF,
                     ),
-                    Divider(height: 1, color: Colors.grey.shade200),
+                    Divider(height: 1, color: theme.dividerColor),
 
-                    // Edit Profile
+                    // Change Display Name
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.edit, color: Colors.grey.shade600),
-                      title: const Text('Edit Profile', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text('Update your account information', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-                      trailing: Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                      onTap: () {},
+                      leading: Icon(Icons.edit, color: isDark ? colorScheme.primary : Colors.grey.shade600),
+                      title: const Text('Change Display Name', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text('Update how your name appears', style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 13)),
+                      trailing: Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
+                      onTap: () => _showChangeNameDialog(),
                     ),
-                    Divider(height: 1, color: Colors.grey.shade200),
+                    Divider(height: 1, color: theme.dividerColor),
 
-                    // Notifications
+                    // Privacy Policy & Terms
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.notifications, color: Colors.grey.shade600),
-                      title: const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text('Manage notification settings', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-                      trailing: Icon(Icons.chevron_right, color: Colors.grey.shade400),
-                      onTap: () {},
+                      leading: Icon(Icons.shield_outlined, color: Colors.blue.shade600),
+                      title: const Text('Privacy Policy & Terms', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text('View how your data is used', style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade500, fontSize: 13)),
+                      trailing: Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyPage(),
+                      )),
                     ),
                   ],
                 ),
@@ -302,14 +300,32 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // ── LOGOUT ───────────────────────────────
               _buildCard(
+                context,
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.logout, color: Colors.red.shade600),
                   title: Text('Logout', style: TextStyle(color: Colors.red.shade600, fontWeight: FontWeight.w600)),
-                  trailing: Icon(Icons.chevron_right, color: Colors.grey.shade400),
+                  trailing: Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
                   onTap: () async {
                     await widget.authService.signOut();
                   },
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // ── DELETE ACCOUNT ───────────────────────
+              _buildCard(
+                context,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.delete_forever, color: Colors.red.shade800),
+                  title: Text('Delete Account',
+                      style: TextStyle(color: Colors.red.shade800, fontWeight: FontWeight.w700)),
+                  subtitle: const Text('Permanently delete your account and all data',
+                      style: TextStyle(fontSize: 12)),
+                  trailing: Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
+                  onTap: () => _showDeleteAccountDialog(),
                 ),
               ),
 
@@ -321,8 +337,189 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _goalButton(int n) {
+  // ── Change Display Name Dialog ──
+
+  Future<void> _showChangeNameDialog() async {
+    final currentName = widget.authService.currentUser?.displayName ?? '';
+    final nameController = TextEditingController(text: currentName);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        bool isSaving = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('Change Display Name', style: TextStyle(fontSize: 18)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      labelText: 'New Name',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    textCapitalization: TextCapitalization.words,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final newName = nameController.text.trim();
+                          if (newName.isEmpty || newName == currentName) {
+                            Navigator.pop(ctx);
+                            return;
+                          }
+                          setDialogState(() => isSaving = true);
+                          try {
+                            await widget.authService.updateDisplayName(newName);
+                            if (mounted) setState(() {});
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          } catch (e) {
+                            setDialogState(() => isSaving = false);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed to update name: $e')),
+                              );
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDark ? colorScheme.primary : Colors.black87,
+                    foregroundColor: isDark ? colorScheme.onPrimary : Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── Delete Account Dialog ───────
+
+  Future<void> _showDeleteAccountDialog() async {
+    final isGoogle = widget.authService.currentFirebaseUser
+            ?.providerData
+            .any((p) => p.providerId == 'google.com') ??
+        false;
+    final passwordController = TextEditingController();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        bool isDeleting = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 22),
+                const SizedBox(width: 8),
+                const Text('Delete Account', style: TextStyle(fontSize: 17)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This permanently deletes your account and ALL workout data. '
+                  'This cannot be undone.',
+                  style: TextStyle(fontSize: 13, height: 1.5),
+                ),
+                if (!isGoogle) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: 'Enter your password to confirm',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      prefixIcon: const Icon(Icons.lock_outline),
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'You will be asked to sign in with Google to confirm.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isDeleting ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: isDeleting
+                    ? null
+                    : () async {
+                        setDialogState(() => isDeleting = true);
+                        try {
+                          await widget.authService.deleteAccount(
+                            password: isGoogle ? null : passwordController.text,
+                          );
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        } catch (e) {
+                          setDialogState(() => isDeleting = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(e.toString()),
+                                backgroundColor: Colors.red.shade700,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: isDeleting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Delete Forever'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
+
+  Widget _goalButton(BuildContext context, int n) {
     final isSelected = _weeklyGoal == n;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Padding(
       padding: const EdgeInsets.only(right: 3),
       child: GestureDetector(
@@ -330,15 +527,15 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Container(
           width: 24, height: 24,
           decoration: BoxDecoration(
-            color: isSelected ? Colors.black87 : Colors.grey.shade100,
+            color: isSelected ? theme.colorScheme.primary : (isDark ? Colors.grey.shade800 : Colors.grey.shade100),
             borderRadius: BorderRadius.circular(5),
-            border: Border.all(color: isSelected ? Colors.black87 : Colors.grey.shade300),
+            border: Border.all(color: isSelected ? theme.colorScheme.primary : (isDark ? Colors.grey.shade700 : Colors.grey.shade300)),
           ),
           child: Center(
             child: Text('$n', style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
-              color: isSelected ? Colors.white : Colors.grey.shade700,
+              color: isSelected ? theme.colorScheme.onPrimary : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
             )),
           ),
         ),
@@ -346,12 +543,13 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  Widget _buildCard(BuildContext context, {required Widget child}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       padding: const EdgeInsets.all(20),
       child: child,
@@ -373,7 +571,7 @@ class _GoalRingPainter extends CustomPainter {
 
     // Background ring
     final bgPaint = Paint()
-      ..color = Colors.grey.shade200
+      ..color = color.withValues(alpha: 0.2)
       ..strokeWidth = 6
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;

@@ -7,10 +7,12 @@ import 'calendar_page.dart';
 import 'news_page.dart';
 import 'settings_page.dart';
 import 'metrics_dashboard_page.dart';
+import 'progress_chart_page.dart';
 import '../services/ble_service.dart';
 import '../services/set_tracker.dart';
 import '../services/auth_service.dart';
 import '../repositories/workout_repository.dart';
+import '../repositories/firestore_workout_plan_repository.dart';
 import '../ble_metrics.dart';
 import '../models/workout.dart';
 
@@ -21,13 +23,12 @@ class HomePage extends StatefulWidget {
   final String connectedDeviceName;
 
   const HomePage({
-    Key? key,
+    super.key,
     BleService? bleService,
     required this.authService,
     required this.workoutRepository,
     this.connectedDeviceName = '',
-  })  : bleService = bleService ?? const _DummyBleService(),
-        super(key: key);
+  })  : bleService = bleService ?? const _DummyBleService();
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -36,7 +37,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _currentPageIndex = 0;
   String _connectedDevice = '';
+  bool _insightsExpanded = false;
   late final SetTracker _setTracker;
+  late final FirestoreWorkoutPlanRepository _planRepository;
 
   @override
   void initState() {
@@ -45,6 +48,7 @@ class _HomePageState extends State<HomePage> {
         ? widget.connectedDeviceName
         : widget.bleService.connectedDeviceName;
     _setTracker = SetTracker(widget.bleService);
+    _planRepository = FirestoreWorkoutPlanRepository();
   }
 
   void _syncConnectionStatus([String? returnedName]) {
@@ -59,8 +63,18 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildHomePage() {
     final currentUser = widget.authService.currentUser;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final colorScheme = theme.colorScheme;
     final userName = currentUser?.displayName ?? 'User';
     final userId = currentUser?.id ?? '';
+
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+            ? 'Good afternoon'
+            : 'Good evening';
 
     return SingleChildScrollView(
       child: Column(
@@ -68,25 +82,17 @@ class _HomePageState extends State<HomePage> {
         children: [
           // Greeting Section
           Container(
-            color: Colors.white,
+            color: theme.scaffoldBackgroundColor,
             padding: const EdgeInsets.fromLTRB(20, 40, 20, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Hi $userName,',
-                  style: const TextStyle(
+                  '$greeting, $userName!',
+                  style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Welcome back!',
-                  style: TextStyle(
-                    color: Colors.grey.shade500,
-                    fontSize: 13,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -95,7 +101,7 @@ class _HomePageState extends State<HomePage> {
 
           // Main content area
           Container(
-            color: Colors.grey.shade50,
+            color: isDark ? theme.scaffoldBackgroundColor : Colors.grey.shade50,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -105,7 +111,7 @@ class _HomePageState extends State<HomePage> {
                   future: widget.workoutRepository.getWorkoutsByUserId(userId),
                   builder: (context, snapshot) {
                     final workouts = snapshot.data ?? [];
-                    return _buildQuickStats(workouts);
+                    return _buildQuickStats(context, workouts);
                   },
                 ),
 
@@ -113,6 +119,7 @@ class _HomePageState extends State<HomePage> {
 
                 // ── CONNECTION SECTION ─────────────────────────
                 _buildSectionBubble(
+                  context: context,
                   title: 'Connection',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -130,7 +137,7 @@ class _HomePageState extends State<HomePage> {
                         icon: const Icon(Icons.bluetooth, size: 22),
                         label: const Text('Connect to Device'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.black87,
+                          backgroundColor: isDark ? Colors.grey.shade800 : Colors.black87,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
@@ -142,9 +149,9 @@ class _HomePageState extends State<HomePage> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          color: _connectedDevice.isEmpty ? Colors.red.shade50 : Colors.green.shade50,
+                          color: _connectedDevice.isEmpty ? (isDark ? Colors.red.shade900.withValues(alpha: 0.2) : Colors.red.shade50) : (isDark ? Colors.green.shade900.withValues(alpha: 0.2) : Colors.green.shade50),
                           border: Border.all(
-                            color: _connectedDevice.isEmpty ? Colors.red.shade200 : Colors.green.shade200,
+                            color: _connectedDevice.isEmpty ? (isDark ? Colors.red.shade900 : Colors.red.shade200) : (isDark ? Colors.green.shade900 : Colors.green.shade200),
                           ),
                           borderRadius: BorderRadius.circular(10),
                         ),
@@ -161,7 +168,7 @@ class _HomePageState extends State<HomePage> {
                             Expanded(
                               child: Text(
                                 _connectedDevice.isEmpty ? 'No Device Connected' : _connectedDevice,
-                                style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500, fontSize: 13),
+                                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700, fontWeight: FontWeight.w500, fontSize: 13),
                               ),
                             ),
                           ],
@@ -175,6 +182,7 @@ class _HomePageState extends State<HomePage> {
 
                 // ── TRAINING SECTION ──────────────────────────
                 _buildSectionBubble(
+                  context: context,
                   title: 'Training',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -187,6 +195,7 @@ class _HomePageState extends State<HomePage> {
                               setTracker: _setTracker,
                               workoutRepository: widget.workoutRepository,
                               userId: userId,
+                              planRepository: _planRepository,
                             ),
                           ));
                         },
@@ -225,13 +234,41 @@ class _HomePageState extends State<HomePage> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: ElevatedButton.icon(
-                              onPressed: () {
+                              onPressed: () async {
+                                final workouts = await widget.workoutRepository.getWorkoutsByUserId(userId);
+                                if (!mounted) return;
                                 Navigator.push(context, MaterialPageRoute(
-                                  builder: (_) => const PlanWorkoutPage(),
+                                  builder: (_) => PlanWorkoutPage(
+                                    planRepository: _planRepository,
+                                    userId: userId,
+                                    date: DateTime.now(),
+                                    pastWorkouts: workouts,
+                                  ),
                                 ));
                               },
                               icon: const Icon(Icons.edit_note, size: 18),
                               label: const Text('Plan'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey.shade700,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => ProgressChartPage(
+                                    workoutRepository: widget.workoutRepository,
+                                    userId: userId,
+                                  ),
+                                ));
+                              },
+                              icon: const Icon(Icons.show_chart, size: 18),
+                              label: const Text('Progress'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.grey.shade700,
                                 foregroundColor: Colors.white,
@@ -253,7 +290,7 @@ class _HomePageState extends State<HomePage> {
                   future: widget.workoutRepository.getWorkoutsByUserId(userId),
                   builder: (context, snapshot) {
                     final workouts = snapshot.data ?? [];
-                    return _buildInsightsSection(workouts);
+                    return _buildInsightsSection(context, workouts);
                   },
                 ),
 
@@ -268,7 +305,7 @@ class _HomePageState extends State<HomePage> {
 
   // ── Quick Stats Strip ─────────────────────────────────────────────
 
-  Widget _buildQuickStats(List<Workout> workouts) {
+  Widget _buildQuickStats(BuildContext context, List<Workout> workouts) {
     final totalWorkouts = workouts.length;
     final now = DateTime.now();
     final weekStart = now.subtract(Duration(days: now.weekday - 1));
@@ -277,32 +314,34 @@ class _HomePageState extends State<HomePage> {
       w.date.isAfter(thisWeekStart.subtract(const Duration(days: 1)))
     ).length;
 
-    double bestMCV = 0;
-    for (final w in workouts) {
-      if (w.peakConcentricVelocity > bestMCV) bestMCV = w.peakConcentricVelocity;
+    double avgMCV = 0;
+    if (workouts.isNotEmpty) {
+      final totalMCV = workouts.fold(0.0, (sum, w) => sum + w.meanConcentricVelocity);
+      avgMCV = totalMCV / workouts.length;
     }
 
     return Row(
       children: [
-        _statCard('Total', '$totalWorkouts', Icons.fitness_center),
+        _statCard(context, 'Total', '$totalWorkouts', Icons.fitness_center),
         const SizedBox(width: 10),
-        _statCard('This Week', '$thisWeek', Icons.calendar_today),
+        _statCard(context, 'This Week', '$thisWeek', Icons.calendar_today),
         const SizedBox(width: 10),
-        _statCard('Best MCV', bestMCV > 0 ? bestMCV.toStringAsFixed(2) : '--', Icons.speed),
+        _statCard(context, 'Avg MCV', avgMCV > 0 ? avgMCV.toStringAsFixed(2) : '--', Icons.speed),
       ],
     );
   }
 
-  Widget _statCard(String label, String value, IconData icon) {
+  Widget _statCard(BuildContext context, String label, String value, IconData icon) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -312,7 +351,7 @@ class _HomePageState extends State<HomePage> {
           children: [
             Icon(icon, size: 20, color: Colors.grey.shade500),
             const SizedBox(height: 6),
-            Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.black87)),
+            Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 2),
             Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.w500)),
           ],
@@ -323,9 +362,13 @@ class _HomePageState extends State<HomePage> {
 
   // ── Insights Section ──────────────────────────────────────────────
 
-  Widget _buildInsightsSection(List<Workout> workouts) {
+  Widget _buildInsightsSection(BuildContext context, List<Workout> workouts) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     if (workouts.isEmpty) {
       return _buildSectionBubble(
+        context: context,
         title: '💡 Insights',
         child: Text(
           'Complete your first workout to see personalized insights!',
@@ -335,45 +378,112 @@ class _HomePageState extends State<HomePage> {
     }
 
     final insights = _generateInsights(workouts);
+    if (insights.isEmpty) {
+      return const SizedBox.shrink(); // No insights generated yet
+    }
 
-    return _buildSectionBubble(
-      title: '💡 Insights',
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
-        children: insights.map((insight) => Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: insight.color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: insight.color.withValues(alpha: 0.2)),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Collapsible Header
+          InkWell(
+            onTap: () {
+              setState(() {
+                _insightsExpanded = !_insightsExpanded;
+              });
+            },
+            borderRadius: _insightsExpanded
+                ? const BorderRadius.vertical(top: Radius.circular(16))
+                : BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '💡 Insights (${insights.length})',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  Icon(
+                    _insightsExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: Colors.grey.shade600,
+                  ),
+                ],
+              ),
             ),
-            child: Row(
+          ),
+
+          // Content Box
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12, top: 4),
+              child: _insightsExpanded
+                  ? Column(
+                      children: insights.map((i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _buildInsightCard(context, i),
+                      )).toList(),
+                    )
+                  : _buildInsightCard(context, insights.first), // Compact mode just shows the top insight
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInsightCard(BuildContext context, _Insight insight) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: insight.color.withValues(alpha: isDark ? 0.15 : 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: insight.color.withValues(alpha: isDark ? 0.3 : 0.2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(insight.emoji, style: const TextStyle(fontSize: 20)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(insight.emoji, style: const TextStyle(fontSize: 20)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        insight.title,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.black87),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        insight.message,
-                        style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-                      ),
-                    ],
-                  ),
+                Text(
+                  insight.title,
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  insight.message,
+                  style: TextStyle(fontSize: 13, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700),
                 ),
               ],
             ),
           ),
-        )).toList(),
+        ],
       ),
     );
   }
@@ -446,19 +556,46 @@ class _HomePageState extends State<HomePage> {
       }
     }
 
+    // 5. Progressive overload suggestion — best 1RM across all sets, suggest +2.5 lbs
+    if (sorted.isNotEmpty) {
+      final exerciseBest = <String, double>{};
+      for (final w in sorted.take(10)) {
+        for (final s in w.sets) {
+          final rm = s.estimated1RMLbs;
+          if (rm != null && rm > 0) {
+            final key = s.exercise;
+            if (!exerciseBest.containsKey(key) || rm > exerciseBest[key]!) {
+              exerciseBest[key] = rm;
+            }
+          }
+        }
+      }
+      if (exerciseBest.isNotEmpty) {
+        final topEntry = exerciseBest.entries.reduce((a, b) => a.value > b.value ? a : b);
+        final suggested = ((topEntry.value * 0.825 / 2.5).round() * 2.5) + 2.5;
+        insights.add(_Insight(
+          emoji: '🎯',
+          title: 'Try Progressive Overload',
+          message: 'Based on your ${topEntry.key} 1RM, try ${suggested.toStringAsFixed(1)} lbs next session for a strength gains bump.',
+          color: Colors.indigo,
+        ));
+      }
+    }
+
     return insights.take(4).toList();
   }
 
   // ── Section Bubble ────────────────────────────────────────────────
 
-  Widget _buildSectionBubble({required String title, required Widget child}) {
+  Widget _buildSectionBubble({required BuildContext context, required String title, required Widget child}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -468,7 +605,7 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87)),
+          Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
           const SizedBox(height: 8),
           child,
         ],
@@ -483,6 +620,7 @@ class _HomePageState extends State<HomePage> {
       CalendarPage(
         workoutRepository: widget.workoutRepository,
         userId: widget.authService.currentUser?.id ?? '',
+        planRepository: _planRepository,
       ),
       const NewsPage(),
       SettingsPage(

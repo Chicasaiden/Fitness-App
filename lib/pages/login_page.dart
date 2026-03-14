@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
@@ -25,6 +26,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   String? errorMessage;
   bool _isLoading = false;
+  bool _isLoadingApple = false;
 
   @override
   void dispose() {
@@ -63,6 +65,25 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => errorMessage = 'An unexpected error occurred');
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Sign in with Apple. Only shown on iOS devices.
+  Future<void> _signInWithApple() async {
+    setState(() {
+      _isLoadingApple = true;
+      errorMessage = null;
+    });
+
+    try {
+      await widget.authService.signInWithApple();
+      // On success, the StreamBuilder detects the auth state change automatically.
+    } catch (e) {
+      if (mounted) {
+        setState(() => errorMessage = 'Apple Sign-In failed or was cancelled.');
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingApple = false);
     }
   }
 
@@ -150,6 +171,7 @@ class _LoginPageState extends State<LoginPage> {
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
                       labelText: 'Email',
                       filled: true,
@@ -160,13 +182,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
 
                   // Password field
                   TextField(
                     controller: _passwordController,
                     obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _signInWithEmail(),
                     decoration: InputDecoration(
                       labelText: 'Password',
                       filled: true,
@@ -277,7 +300,7 @@ class _LoginPageState extends State<LoginPage> {
                       icon: Image.network(
                         'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg',
                         height: 20,
-                        errorBuilder: (_, __, ___) =>
+                        errorBuilder: (_, _, _) =>
                             const Icon(Icons.g_mobiledata, size: 24),
                       ),
                       label: const Text(
@@ -289,6 +312,37 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
+
+                  if (Platform.isIOS) ...[
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: Colors.black,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: _isLoadingApple ? null : _signInWithApple,
+                        icon: _isLoadingApple
+                            ? const SizedBox(
+                                height: 20, width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.apple, size: 24, color: Colors.white),
+                        label: const Text(
+                          'Sign in with Apple',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 24),
 

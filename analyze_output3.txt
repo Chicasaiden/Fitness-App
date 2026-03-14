@@ -1,0 +1,15 @@
+﻿Analyzing hello_flutter...                                      
+
+warning - Dead code - lib\pages\settings_page.dart:402:41 - dead_code
+warning - Dead code - lib\pages\settings_page.dart:407:23 - dead_code
+
+flutter : 2 issues found. (ran in 16.4s)
+At line:1 char:1
++ flutter analyze 2>&1 | Out-File -FilePath 
+"C:\Users\Aiden\develop\app ...
++ ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2 i 
+   ssues found. (ran in 16.4s):String) [], Remo  
+  teException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

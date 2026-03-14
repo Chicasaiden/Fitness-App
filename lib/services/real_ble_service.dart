@@ -1,7 +1,7 @@
 // real_ble_service.dart
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -97,7 +97,7 @@ class RealBleService implements BleService {
 
         final matches = advertised.contains(velocityServiceUUID.toLowerCase());
         if (matches) {
-          debugPrint('Scan match: ${r.device.id} (${r.device.name})');
+          debugPrint('Scan match: ${r.device.remoteId} (${r.device.platformName})');
         }
         return matches;
       } catch (e) {
@@ -112,13 +112,13 @@ class RealBleService implements BleService {
       _connectedDevice = device;
 
       // If already connected, skip connect
-      final connectedState = await device.state.first;
-      if (connectedState == BluetoothDeviceState.connected) {
+      final connectedState = await device.connectionState.first;
+      if (connectedState == BluetoothConnectionState.connected) {
         debugPrint('Device already connected');
       } else {
-        debugPrint('Connecting to device ${device.id}...');
+        debugPrint('Connecting to device ${device.remoteId}...');
         await device.connect(timeout: const Duration(seconds: 10));
-        debugPrint('Connected to ${device.id}');
+        debugPrint('Connected to ${device.remoteId}');
       }
 
       await _discoverAndSubscribe(device);
@@ -137,7 +137,7 @@ class RealBleService implements BleService {
         debugPrint('Service UUID: $svcUuid');
         
         if (svcUuid == velocityServiceUUID.toLowerCase()) {
-          debugPrint('Found velocity service on device ${device.id}');
+          debugPrint('Found velocity service on device ${device.remoteId}');
           for (final characteristic in service.characteristics) {
             final charUuid = characteristic.uuid.toString().toLowerCase();
             debugPrint('Characteristic: $charUuid, properties: ${characteristic.properties}');
@@ -149,7 +149,7 @@ class RealBleService implements BleService {
                 await characteristic.setNotifyValue(true);
 
                 _velocitySubscription?.cancel();
-                _velocitySubscription = characteristic.value.listen(
+                _velocitySubscription = characteristic.lastValueStream.listen(
                   (data) {
                     if (data.length >= 4) {
                       try {
@@ -190,7 +190,7 @@ class RealBleService implements BleService {
                 await characteristic.setNotifyValue(true);
 
                 _repStatsSubscription?.cancel();
-                _repStatsSubscription = characteristic.value.listen(
+                _repStatsSubscription = characteristic.lastValueStream.listen(
                   (data) {
                     if (data.length >= 29) {
                       try {
@@ -252,7 +252,7 @@ class RealBleService implements BleService {
           }
         }
       }
-      debugPrint('Service discovery complete for device ${device.id}');
+      debugPrint('Service discovery complete for device ${device.remoteId}');
     } catch (e) {
       debugPrint('_discoverAndSubscribe error: $e');
     }
